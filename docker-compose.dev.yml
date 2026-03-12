@@ -3,10 +3,10 @@ services:
     image: mysql:8.0
     command: --default-authentication-plugin=mysql_native_password
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: ragengine
-      MYSQL_USER: ragengine
-      MYSQL_PASSWORD: ragengine
+      MYSQL_ROOT_PASSWORD: ragwebui
+      MYSQL_DATABASE: ragwebui
+      MYSQL_USER: ragwebui
+      MYSQL_PASSWORD: ragwebui
     ports:
       - "3307:3306"
     volumes:
