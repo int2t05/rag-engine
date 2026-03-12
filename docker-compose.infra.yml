@@ -1,0 +1,53 @@
+# docker-compose.infra.yml 正确版本
+services:
+  # MySQL 服务
+  db:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: ragengine
+      MYSQL_DATABASE: ragengine
+      MYSQL_USER: ragengine
+      MYSQL_PASSWORD: ragengine
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - app_network
+
+  # ChromaDB 服务
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    networks:
+      - app_network
+
+  # MinIO 服务
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    command: server --console-address ":9001" /data
+    networks:
+      - app_network
+
+# 数据卷
+volumes:
+  mysql_data:
+  chroma_data:
+  minio_data:
+
+# 自定义网络
+networks:
+  app_network:
+    driver: bridge
