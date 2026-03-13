@@ -50,6 +50,10 @@ export async function fetchApi(
     throw new ApiError(res.status, err.detail || "请求失败，请稍后重试");
   }
 
+  // 204 No Content 无响应体，无需解析 JSON
+  if (res.status === 204) {
+    return null;
+  }
   return res.json();
 }
 
@@ -58,4 +62,8 @@ export const api = {
     fetchApi(url, { ...opts, method: "GET" }),
   post: (url: string, data?: any, opts?: Omit<RequestInit, "method">) =>
     fetchApi(url, { ...opts, method: "POST", data }),
+  put: (url: string, data?: any, opts?: Omit<RequestInit, "method">) =>
+    fetchApi(url, { ...opts, method: "PUT", data }),
+  delete: (url: string, opts?: Omit<RequestInit, "method">) =>
+    fetchApi(url, { ...opts, method: "DELETE" }),
 };

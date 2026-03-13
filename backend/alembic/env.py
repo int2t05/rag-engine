@@ -13,7 +13,8 @@ from os.path import abspath, dirname
 sys.path.insert(0, dirname(dirname(abspath(__file__))))
 from app.core.config import settings
 from app.models.base import Base  # 导入所有模型的基类
-from app.models.user import User  # 导入用户模型（必须导入，否则识别不到）
+from app.models.user import User  # 导入用户模型
+from app.models.knowledge import KnowledgeBase, Document
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

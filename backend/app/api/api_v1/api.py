@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.api_v1 import auth
+from app.api.api_v1 import auth, knowledge_base
 
 api_router = APIRouter()
 
@@ -7,3 +7,6 @@ api_router = APIRouter()
 # prefix 路径前缀，多层注册时会叠加
 # tags Swagger 文档中的分组标签
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(
+    knowledge_base.router, prefix="/knowledge-base", tags=["knowledge-base"]
+)

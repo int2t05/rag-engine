@@ -8,3 +8,7 @@ SQLAlchemy>=2.0
 mysql-connector-python
 alembic
 email-validator
+
+# 测试依赖
+pytest>=7.0.0
+httpx>=0.25.0
