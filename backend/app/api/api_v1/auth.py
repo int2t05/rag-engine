@@ -1,73 +1,123 @@
+"""
+认证 API
+========
+提供用户注册、登录（获取 JWT Token）和 Token 验证接口。
+"""
+
 from datetime import timedelta
+from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from jose import JWTError, jwt
+import requests
+from requests.exceptions import RequestException
+
 from app.core import security
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.user import UserCreate, UserResponse
 from app.schemas.token import Token
+from app.schemas.user import UserCreate, UserResponse
 
-# 创建路由实例  路由管理器 统一前缀
 router = APIRouter()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# 注册接口 /register为相对路径
-# 如果省略 status_code（默认 200）
-# user_in: UserCreate 类型注解 表示接收一个UserCreate类型的参数
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(*, db: Session = Depends(get_db), user_in: UserCreate):
-    """
-    用户注册：
-    - 校验邮箱/用户名是否已存在
-    - 密码哈希后存储
-    - 返回用户信息（不含密码）
-    """
-    # 检查邮箱是否已存在
-    if db.query(User).filter(User.email == user_in.email).first():
-        # 触发异常
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already exists"
-        )
-    # 检查用户名是否已存在
-    if db.query(User).filter(User.username == user_in.username).first():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already exists"
-        )
-    # 创建用户（密码哈希）
-    user = User(
-        email=user_in.email,
-        username=user_in.username,
-        hashed_password=security.get_password_hash(user_in.password),
+
+def get_current_user(
+    db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)
+) -> User:
+    """本模块内的 Token 解析，其他模块通常使用 core.security 中的 get_current_user"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="无法验证凭据",
+        headers={"WWW-Authenticate": "Bearer"},
     )
-    # 写入数据库
-    db.add(user)
-    db.commit()
-    db.refresh(user)  # 刷新获取自动生成的字段（id/created_at等）
+    try:
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
+        username: str = payload.get("sub")  # type: ignore
+        if username is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+
+    user = db.query(User).filter(User.username == username).first()
+    if user is None:
+        raise credentials_exception
     return user
 
-# 登录接口（兼容OAuth2密码模式）
+
+@router.post("/register", response_model=UserResponse)
+def register(*, db: Session = Depends(get_db), user_in: UserCreate) -> Any:
+    """
+    用户注册
+    检查邮箱和用户名唯一性，密码使用 bcrypt 哈希后存储
+    """
+    try:
+        user = db.query(User).filter(User.email == user_in.email).first()
+        if user:
+            raise HTTPException(
+                status_code=400,
+                detail="使用此电子邮件的用户已存在。",
+            )
+
+        user = db.query(User).filter(User.username == user_in.username).first()
+        if user:
+            raise HTTPException(
+                status_code=400,
+                detail="具有此用户名的用户已存在.",
+            )
+
+        user = User(
+            email=user_in.email,
+            username=user_in.username,
+            hashed_password=security.get_password_hash(user_in.password),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
+    except RequestException as e:
+        raise HTTPException(
+            status_code=503,
+            detail="网络错误或服务器无法访问。请稍后再试.",
+        ) from e
+
+
 @router.post("/token", response_model=Token)
-def login(
-    db: Session = Depends(get_db),
-    form_data: OAuth2PasswordRequestForm = Depends()
-):
+def login_access_token(
+    db: Session = Depends(get_db), form_data: OAuth2PasswordRequestForm = Depends()
+) -> Any:
     """
-    用户登录：
-    - 用户名+密码验证
-    - 生成JWT Token返回
+    登录获取 JWT Token（OAuth2 密码模式）
+    前端传 username + password，返回 access_token
     """
-    # 查询用户
     user = db.query(User).filter(User.username == form_data.username).first()
-    # 验证用户存在且密码正确
-    if not user or not security.verify_password(form_data.password, user.hashed_password): # type: ignore
+    if not user or not security.verify_password(
+        form_data.password, user.hashed_password
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="用户名或密码不正确",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    # 生成Token（sub=subject，存储用户名）
-    access_token = security.create_access_token(data={"sub": user.username})
+    elif not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Inactive用户",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = security.create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/test-token", response_model=UserResponse)
+def test_token(current_user: User = Depends(get_current_user)) -> Any:
+    """验证 Token 是否有效，返回当前用户信息"""
+    return current_user

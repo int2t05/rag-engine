@@ -47,7 +47,16 @@ export async function fetchApi(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, err.detail || "请求失败，请稍后重试");
+    const detail = err.detail;
+    let message = "请求失败，请稍后重试";
+    if (typeof detail === "string") {
+      message = detail;
+    } else if (Array.isArray(detail) && detail.length > 0) {
+      message = detail.map((e: { msg?: string }) => e.msg || "").filter(Boolean).join("; ") || message;
+    } else if (detail && typeof detail === "object" && "msg" in detail) {
+      message = (detail as { msg?: string }).msg || message;
+    }
+    throw new ApiError(res.status, message);
   }
 
   // 204 No Content 无响应体，无需解析 JSON

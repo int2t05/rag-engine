@@ -1,21 +1,38 @@
-from pydantic import BaseModel, EmailStr, Field
+"""
+用户相关 Pydantic 模型
+=====================
+定义用户相关的请求体（Create）和响应体（Response）的数据结构。
+Pydantic 负责自动校验请求数据格式，并生成 OpenAPI 文档。
+"""
+
+from pydantic import BaseModel, EmailStr
+from typing import Optional
 from datetime import datetime
 
-# 注册时的请求体（校验输入）
-class UserCreate(BaseModel):
-    email: EmailStr  # 自动校验邮箱格式
-    username: str = Field(min_length=3, max_length=50)  # 用户名长度限制
-    password: str = Field(min_length=6)  # 密码最小长度
 
-# 响应体（返回给前端的数据，隐藏敏感字段）
-class UserResponse(BaseModel):
-    id: int
+class UserBase(BaseModel):
+    """用户基础字段，Create 和 Update 共用"""
     email: EmailStr
     username: str
-    is_active: bool
+    is_active: bool = True
+    is_superuser: bool = False
+
+
+class UserCreate(UserBase):
+    """注册时的请求体，需要额外提供明文密码"""
+    password: str
+
+
+class UserUpdate(UserBase):
+    """更新用户时的请求体，密码可选（不填则不修改）"""
+    password: Optional[str] = None
+
+
+class UserResponse(UserBase):
+    """返回给前端的用户信息，不含密码"""
+    id: int
     created_at: datetime
     updated_at: datetime
 
-    # 支持从ORM模型（User类）转换为Pydantic模型
     class Config:
-        from_attributes = True
+        from_attributes = True  # 允许从 ORM 对象自动构建
