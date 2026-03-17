@@ -55,5 +55,6 @@ class ChromaVectorStore(BaseVectorStore):
         return self._store.similarity_search_with_score(query, k=k, **kwargs) # type: ignore
 
     def delete_collection(self) -> None:
-        """Delete the entire collection"""
+        """删除整个集合"""
         self._store._client.delete_collection(self._store._collection.name)
+

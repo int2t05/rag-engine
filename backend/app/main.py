@@ -10,11 +10,14 @@ RAG Web UI 后端应用入口
 import logging
 
 from app.api.api_v1.api import api_router
+
 # from app.api.openapi.api import router as openapi_router
 from app.core.config import settings
 from app.core.minio import init_minio
-# from app.startup.migarate import DatabaseMigrator
+
+from app.startup.migarate import DatabaseMigrator
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 # 配置日志格式，方便调试时查看时间、模块名、日志级别和消息
 logging.basicConfig(
@@ -31,6 +34,14 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # 注册内部 API 路由（JWT 认证），前缀为 /api
 # 包含：/api/auth、/api/knowledge-base、/api/chat、/api/api-keys
 app.include_router(api_router, prefix=settings.API_V1_STR)
@@ -40,16 +51,16 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 # app.include_router(openapi_router, prefix="/openapi")
 
 
-# @app.on_event("startup")
-# async def startup_event():
-#     """
-#     应用启动时执行的初始化操作：
-#     1. 初始化 MinIO：确保存储桶存在
-#     2. 运行数据库迁移：自动更新数据库表结构到最新版本
-#     """
-#     init_minio()
-#     migrator = DatabaseMigrator(settings.get_database_url)
-#     migrator.run_migrations()
+@app.on_event("startup")
+async def startup_event():
+    """
+    应用启动时执行的初始化操作：
+    1. 初始化 MinIO：确保存储桶存在
+    2. 运行数据库迁移：自动更新数据库表结构到最新版本
+    """
+    init_minio()
+    migrator = DatabaseMigrator(settings.get_database_url)
+    migrator.run_migrations()
 
 
 @app.get("/")

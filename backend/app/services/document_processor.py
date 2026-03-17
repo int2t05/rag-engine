@@ -85,7 +85,7 @@ async def process_document(
         preview_result = await preview_document(file_path, chunk_size, chunk_overlap)
 
         # 初始化 embeddings
-        logger.info("初始化 OpenAI embeddings...")
+        logger.info("初始化 embeddings模型...")
         embeddings = EmbeddingsFactory.create()
 
         logger.info(f"使用集合初始化向量存储：kb_{kb_id}")
@@ -199,7 +199,7 @@ async def upload_document(file: UploadFile, kb_id: int) -> UploadResult:
             content_type=content_type,
         )
     except Exception as e:
-        logging.error(f"Failed to upload file to MinIO: {str(e)}")
+        logging.error(f"无法将文件上载到MinIO: {str(e)}")
         raise
 
     return UploadResult(
@@ -221,14 +221,16 @@ async def preview_document(
     ext = ext.lower()
 
     # 下载到临时文件
-    # tempfile 模块用于创建临时文件 / 目录 使用 with 上下文管理器
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
-        minio_client.fget_object(
-            bucket_name=settings.MINIO_BUCKET_NAME,
-            object_name=file_path,
-            file_path=temp_file.name,
-        )
-        temp_path = temp_file.name
+    # 先生成唯一临时路径再关闭，避免 Windows 上文件锁冲突
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+    temp_path = temp_file.name
+    temp_file.close()
+
+    minio_client.fget_object(
+        bucket_name=settings.MINIO_BUCKET_NAME,
+        object_name=file_path,
+        file_path=temp_path,
+    )
 
     try:
         # 选择适当的加载程序
@@ -239,7 +241,7 @@ async def preview_document(
         elif ext == ".md":
             loader = UnstructuredMarkdownLoader(temp_path)
         else:  # 默认为文本加载器
-            loader = TextLoader(temp_path)
+            loader = TextLoader(temp_path, encoding="utf-8")
 
         # 加载和拆分文档 递归分块
         documents = loader.load()
@@ -322,7 +324,7 @@ async def process_document_background(
             elif ext == ".md":
                 loader = UnstructuredMarkdownLoader(local_temp_path)
             else:  # 默认使用文本加载器
-                loader = TextLoader(local_temp_path)
+                loader = TextLoader(local_temp_path, encoding="utf-8")
 
             logger.info(f"任务 {task_id}：加载文档内容")
             documents = loader.load()

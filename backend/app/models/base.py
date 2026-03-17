@@ -14,11 +14,14 @@
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, Integer, DateTime
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 # SQLAlchemy 声明式基类
 # 所有数据库模型都继承自 Base，SQLAlchemy 通过它追踪所有模型类
 Base = declarative_base()
+
+# 定义东八区时区
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 
 class TimestampMixin:
@@ -29,5 +32,10 @@ class TimestampMixin:
     - created_at：记录创建时间，在插入时自动设置为当前 UTC 时间
     - updated_at：记录更新时间，在插入和每次更新时自动设置为当前 UTC 时间
     """
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(BEIJING_TZ))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(BEIJING_TZ),
+        onupdate=lambda: datetime.now(BEIJING_TZ),
+    )

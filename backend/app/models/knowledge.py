@@ -14,7 +14,7 @@ RAG 文档处理流程对应的表：
 from sqlalchemy import Column, Integer, String, ForeignKey, Text, DateTime, JSON, BigInteger, TIMESTAMP, text
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import relationship
-from app.models.base import Base, TimestampMixin
+from app.models.base import Base, TimestampMixin, BEIJING_TZ
 from datetime import datetime
 import sqlalchemy as sa
 
@@ -36,8 +36,6 @@ class KnowledgeBase(Base, TimestampMixin):
     name = Column(String(255), nullable=False)
     description = Column(LONGTEXT)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     documents = relationship("Document", back_populates="knowledge_base", cascade="all, delete-orphan")
     user = relationship("User", back_populates="knowledge_bases")
@@ -67,8 +65,6 @@ class Document(Base, TimestampMixin):
     content_type = Column(String(100), nullable=False)
     file_hash = Column(String(64), index=True)
     knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     knowledge_base = relationship("KnowledgeBase", back_populates="documents")
     processing_tasks = relationship("ProcessingTask", back_populates="document")
@@ -99,7 +95,7 @@ class DocumentUpload(Base):
     file_size = Column(BigInteger, nullable=False)
     content_type = Column(String(255), nullable=False)
     temp_path = Column(String(255), nullable=False)
-    created_at = Column(TIMESTAMP, nullable=False, server_default=text("now()"))
+    created_at = Column(DateTime, default=lambda: datetime.now(BEIJING_TZ))
     status = Column(String(255), nullable=False, server_default="pending")
     error_message = Column(Text)
 
@@ -122,8 +118,8 @@ class ProcessingTask(Base):
     document_upload_id = Column(Integer, ForeignKey("document_uploads.id"), nullable=True)  # 新上传的文档
     status = Column(String(50), default="pending")
     error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(BEIJING_TZ))
+    updated_at = Column(DateTime, default=lambda: datetime.now(BEIJING_TZ), onupdate=lambda: datetime.now(BEIJING_TZ))
 
     knowledge_base = relationship("KnowledgeBase", back_populates="processing_tasks")
     document = relationship("Document", back_populates="processing_tasks")

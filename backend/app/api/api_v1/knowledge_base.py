@@ -219,7 +219,7 @@ async def delete_knowledge_base(
 
         # 2. 清理矢量存储
         try:
-            vector_store._store.delete_collection(f"kb_{kb_id}")  # type: ignore
+            vector_store.delete_collection()
             logger.info(f"清理知识库{kb_id}的矢量存储 ")
         except Exception as e:
             cleanup_errors.append(f"无法清理矢量存储: {str(e)}")
@@ -476,7 +476,7 @@ async def add_processing_tasks_to_queue(task_data, kb_id):
                 data["temp_path"], data["file_name"], kb_id, data["task_id"], None
             )
         )
-    logger.info(f"已将{len(task_data)}文档处理任务添加到队列")
+    logger.info(f"已将{len(task_data)}个文档处理任务添加到队列")
 
 
 @router.post("/cleanup")
@@ -486,7 +486,8 @@ async def cleanup_temp_files(
     """
     清理过期的临时文件。
     """
-    expired_time = datetime.utcnow() - timedelta(hours=24)
+    from app.models.base import BEIJING_TZ
+    expired_time = datetime.now(BEIJING_TZ) - timedelta(hours=24)
     expired_uploads = (
         db.query(DocumentUpload).filter(DocumentUpload.created_at < expired_time).all()
     )
@@ -578,7 +579,7 @@ async def get_document(
     )
 
     if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
+        raise HTTPException(status_code=404, detail="文件未找到")
 
     return document
 

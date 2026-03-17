@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     MINIO_BUCKET_NAME: str = Field(default="documents", alias="MINIO_BUCKET_NAME")
 
     # Embedding（文本向量化）配置
-    # Embedding 提供商：openai / dashscope / ollama
+    # Embedding 提供商：openai / dashscope / ollama / zhipu
     # Embedding 配置
     EMBEDDINGS_PROVIDER: str = Field(default="openai", alias="EMBEDDINGS_PROVIDER")
 
@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     DASH_SCOPE_API_KEY: str = Field(default="", alias="DASH_SCOPE_API_KEY")
     DASH_SCOPE_EMBEDDINGS_MODEL: str = Field(
         default="", alias="DASH_SCOPE_EMBEDDINGS_MODEL"
+    )
+
+    # 智谱 GLM Embedding 配置
+    ZHIPUAI_API_KEY: str = Field(default="", alias="ZHIPUAI_API_KEY")
+    ZHIPUAI_EMBEDDINGS_MODEL: str = Field(
+        default="embedding-3", alias="ZHIPUAI_EMBEDDINGS_MODEL"
     )
 
     # Ollama 配置

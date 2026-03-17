@@ -26,10 +26,10 @@ def get_minio_client() -> Minio:
     """
     logger.info("创建MinIO客户端实例")
     return Minio(
-        settings.MINIO_ENDPOINT,      # MinIO 服务地址，如 "minio:9000"
+        settings.MINIO_ENDPOINT,  # MinIO 服务地址，如 "minio:9000"
         access_key=settings.MINIO_ACCESS_KEY,  # 访问密钥（类似用户名）
         secret_key=settings.MINIO_SECRET_KEY,  # 秘密密钥（类似密码）
-        secure=False  # 生产环境建议设为 True 使用 HTTPS
+        secure=False,  # 生产环境建议设为 True 使用 HTTPS
     )
 
 
@@ -41,9 +41,9 @@ def init_minio():
     桶名由配置中的 MINIO_BUCKET_NAME 决定，默认为 "documents"
     """
     client = get_minio_client()
-    logger.info(f"Checking if bucket {settings.MINIO_BUCKET_NAME} exists.")
+    logger.info(f"正在检查存储桶{settings.MINIO_BUCKET_NAME}是否存在.")
     if not client.bucket_exists(settings.MINIO_BUCKET_NAME):
-        logger.info(f"Bucket {settings.MINIO_BUCKET_NAME} does not exist. Creating bucket.")
+        logger.info(f"存储桶{settings.MINIO_BUCKET_NAME}不存在。正在创建存储桶。")
         client.make_bucket(settings.MINIO_BUCKET_NAME)
     else:
-        logger.info(f"Bucket {settings.MINIO_BUCKET_NAME} already exists.")
+        logger.info(f"存储桶{settings.MINIO_BUCKET_NAME}已存在。")
