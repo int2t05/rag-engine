@@ -75,6 +75,12 @@ class Settings(BaseSettings):
         default="text-embedding-ada-002", alias="OPENAI_EMBEDDINGS_MODEL"
     )
 
+    # DeepSeek 配置
+    DEEPSEEK_API_KEY: str = Field(default="", alias="DEEPSEEK_API_KEY")
+    DEEPSEEK_API_BASE: str = Field(default="", alias="DEEPSEEK_API_BASE")
+    # Deepseek 模型可以是 deepseek-chat 或 deepseek-reasoner
+    DEEPSEEK_MODEL: str = Field(default="deepseek-chat", alias="DEEPSEEK_MODEL")
+
     # DashScope 配置
     DASH_SCOPE_API_KEY: str = Field(default="", alias="DASH_SCOPE_API_KEY")
     DASH_SCOPE_EMBEDDINGS_MODEL: str = Field(
@@ -86,6 +92,7 @@ class Settings(BaseSettings):
     ZHIPUAI_EMBEDDINGS_MODEL: str = Field(
         default="embedding-3", alias="ZHIPUAI_EMBEDDINGS_MODEL"
     )
+    ZHIPUAI_MODEL: str = Field(default="glm-4.5", alias="ZHIPUAI_MODEL")
 
     # Ollama 配置
     OLLAMA_API_BASE: str = Field(
@@ -95,6 +102,9 @@ class Settings(BaseSettings):
     OLLAMA_EMBEDDINGS_MODEL: str = Field(
         default="nomic-embed-text", alias="OLLAMA_EMBEDDINGS_MODEL"
     )
+
+    # 聊天模型提供商：openai / deepseek / ollama
+    CHAT_PROVIDER: str = Field(default="openai", alias="CHAT_PROVIDER")
 
     # Pydantic V2 配置
     model_config = SettingsConfigDict(

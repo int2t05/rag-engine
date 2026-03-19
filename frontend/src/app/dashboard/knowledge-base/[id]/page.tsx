@@ -2,76 +2,25 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { api, ApiError } from "@/lib/api";
-
-/* ---------- types ---------- */
-
-interface ProcessingTask {
-  id: number;
-  status: string;
-  error_message: string | null;
-  document_id: number | null;
-  knowledge_base_id: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface DocumentItem {
-  id: number;
-  file_name: string;
-  file_path: string;
-  file_hash: string;
-  file_size: number;
-  content_type: string;
-  knowledge_base_id: number;
-  created_at: string;
-  updated_at: string;
-  processing_tasks: ProcessingTask[];
-}
-
-interface KnowledgeBase {
-  id: number;
-  name: string;
-  description: string | null;
-  user_id: number;
-  created_at: string;
-  updated_at: string;
-  documents: DocumentItem[];
-}
-
-interface UploadResult {
-  upload_id?: number;
-  document_id?: number;
-  file_name: string;
-  temp_path?: string;
-  status: string;
-  message?: string;
-  skip_processing: boolean;
-}
-
-interface TaskStatus {
-  document_id: number | null;
-  status: string;
-  error_message: string | null;
-  upload_id: number;
-  file_name: string;
-}
-
-interface RetrievalResult {
-  content: string;
-  metadata: Record<string, any>;
-  score: number;
-}
-
-interface PreviewChunk {
-  content: string;
-  metadata: Record<string, any> | null;
-}
-
-interface PreviewResult {
-  chunks: PreviewChunk[];
-  total_chunks: number;
-}
+import {
+  knowledgeBaseApi,
+  ApiError,
+  KnowledgeBase,
+  DocumentItem,
+  UploadResult,
+  TaskStatus,
+  PreviewResult,
+  RetrievalResult,
+} from "@/lib/api";
+import {
+  ArrowLeftIcon,
+  EditIcon,
+  UploadIcon,
+  FileIcon,
+  ChevronRightIcon,
+  TrashIcon,
+} from "@/components/icons";
+import { Toast } from "@/components/Toast";
 
 /* ---------- helpers ---------- */
 
@@ -107,6 +56,11 @@ export default function KnowledgeBaseDetailPage() {
   const [kb, setKb] = useState<KnowledgeBase | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [toast, setToast] = useState({ msg: "", type: "success" as "success" | "error" | "info", show: false });
+
+  const showToast = (msg: string, type: "success" | "error" | "info" = "error") => {
+    setToast({ msg, type, show: true });
+  };
 
   // upload
   const [uploading, setUploading] = useState(false);
@@ -131,7 +85,6 @@ export default function KnowledgeBaseDetailPage() {
 
   // cleanup
   const [cleaning, setCleaning] = useState(false);
-  const [cleanupMsg, setCleanupMsg] = useState("");
 
   // retrieval test
   const [query, setQuery] = useState("");
@@ -144,7 +97,7 @@ export default function KnowledgeBaseDetailPage() {
   const fetchKb = useCallback(async () => {
     try {
       setError("");
-      const data = await api.get(`/api/knowledge-base/${id}`);
+      const data = await knowledgeBaseApi.get(Number(id));
       setKb(data);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "获取详情失败");
@@ -164,14 +117,11 @@ export default function KnowledgeBaseDetailPage() {
     try {
       const formData = new FormData();
       Array.from(files).forEach((f) => formData.append("files", f));
-
-      const results: UploadResult[] = await api.post(
-        `/api/knowledge-base/${id}/documents/upload`,
-        formData,
-      );
+      const results: UploadResult[] = await knowledgeBaseApi.uploadDocuments(Number(id), formData);
       setUploadResults(results);
+      showToast(`已上传 ${results.length} 个文件`, "success");
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "上传失败");
+      showToast(err instanceof ApiError ? err.message : "上传失败", "error");
     } finally {
       setUploading(false);
     }
@@ -193,7 +143,7 @@ export default function KnowledgeBaseDetailPage() {
     const docIds = uploadResults
       .filter((r) => !r.skip_processing)
       .map((r) => r.upload_id)
-      .filter((id): id is number => id !== undefined);
+      .filter((uid): uid is number => uid !== undefined);
 
     if (!docIds.length) return;
 
@@ -201,14 +151,11 @@ export default function KnowledgeBaseDetailPage() {
     setPreviewError("");
     setPreviewData({});
     try {
-      const data = await api.post(
-        `/api/knowledge-base/${id}/documents/preview`,
-        {
-          document_ids: docIds,
-          chunk_size: chunkSize,
-          chunk_overlap: chunkOverlap,
-        },
-      );
+      const data = await knowledgeBaseApi.previewDocuments(Number(id), {
+        document_ids: docIds,
+        chunk_size: chunkSize,
+        chunk_overlap: chunkOverlap,
+      });
       setPreviewData(data);
       setShowPreview(true);
     } catch (err) {
@@ -225,20 +172,16 @@ export default function KnowledgeBaseDetailPage() {
 
     setProcessing(true);
     try {
-      const res = await api.post(
-        `/api/knowledge-base/${id}/documents/process`,
-        uploadResults,
-      );
+      const res = await knowledgeBaseApi.processDocuments(Number(id), uploadResults);
       const tasks: { upload_id: number; task_id: number }[] = res.tasks;
       if (tasks.length > 0) {
-        const ids = tasks.map((t) => t.task_id);
-        setPollingTaskIds(ids);
+        setPollingTaskIds(tasks.map((t) => t.task_id));
       } else {
         await fetchKb();
         setUploadResults([]);
       }
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "处理失败");
+      showToast(err instanceof ApiError ? err.message : "处理失败", "error");
     } finally {
       setProcessing(false);
     }
@@ -253,13 +196,10 @@ export default function KnowledgeBaseDetailPage() {
 
     const poll = async () => {
       try {
-        const idsStr = pollingTaskIds.join(",");
-        const data: Record<string, TaskStatus> = await api.get(
-          `/api/knowledge-base/${id}/documents/tasks?task_ids=${idsStr}`,
-        );
+        const data = await knowledgeBaseApi.getProcessingTasks(Number(id), pollingTaskIds);
         const mapped: Record<number, TaskStatus> = {};
         for (const [k, v] of Object.entries(data)) {
-          mapped[Number(k)] = v;
+          mapped[Number(k)] = v as TaskStatus;
         }
         setTaskMap(mapped);
 
@@ -270,6 +210,7 @@ export default function KnowledgeBaseDetailPage() {
           setPollingTaskIds([]);
           setUploadResults([]);
           await fetchKb();
+          showToast("文档处理完成", "success");
         }
       } catch {
         // ignore polling errors
@@ -286,12 +227,11 @@ export default function KnowledgeBaseDetailPage() {
   /* ---------- cleanup ---------- */
   const handleCleanup = async () => {
     setCleaning(true);
-    setCleanupMsg("");
     try {
-      const data = await api.post("/api/knowledge-base/cleanup");
-      setCleanupMsg(data.message || "清理完成");
+      const data = await knowledgeBaseApi.cleanup();
+      showToast(data.message || "清理完成", "success");
     } catch (err) {
-      setCleanupMsg(err instanceof ApiError ? err.message : "清理失败");
+      showToast(err instanceof ApiError ? err.message : "清理失败", "error");
     } finally {
       setCleaning(false);
     }
@@ -304,7 +244,7 @@ export default function KnowledgeBaseDetailPage() {
     setRetrievalError("");
     setRetrievalResults([]);
     try {
-      const data = await api.post("/api/knowledge-base/test-retrieval", {
+      const data = await knowledgeBaseApi.testRetrieval({
         query: query.trim(),
         kb_id: Number(id),
         top_k: topK,
@@ -358,10 +298,10 @@ export default function KnowledgeBaseDetailPage() {
       </Link>
 
       {/* KB Info */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">{kb.name}</h1>
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="flex items-start justify-between mb-4 gap-4">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-gray-800 truncate">{kb.name}</h1>
             <p className="text-sm text-gray-500 mt-1">
               {kb.description || "暂无描述"}
             </p>
@@ -395,7 +335,7 @@ export default function KnowledgeBaseDetailPage() {
       </div>
 
       {/* Document Upload */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-800">上传文档</h2>
           <button
@@ -408,11 +348,6 @@ export default function KnowledgeBaseDetailPage() {
             {cleaning ? "清理中..." : "清理临时文件"}
           </button>
         </div>
-        {cleanupMsg && (
-          <div className="mb-3 text-xs text-gray-600 bg-gray-50 px-3 py-2 rounded-lg">
-            {cleanupMsg}
-          </div>
-        )}
 
         <div
           onDragOver={(e) => {
@@ -422,7 +357,7 @@ export default function KnowledgeBaseDetailPage() {
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
           onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+          className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
             dragOver
               ? "border-blue-400 bg-blue-50"
               : "border-gray-300 hover:border-gray-400 hover:bg-gray-50"
@@ -470,7 +405,7 @@ export default function KnowledgeBaseDetailPage() {
             {pendingUploads.length > 0 && (
               <>
                 {/* Chunk settings */}
-                <div className="mt-3 p-3 bg-gray-50 rounded-lg space-y-3">
+                <div className="mt-3 p-3 bg-gray-50 rounded-xl space-y-3">
                   <h4 className="text-xs font-medium text-gray-600 uppercase tracking-wide">
                     分块参数
                   </h4>
@@ -486,7 +421,7 @@ export default function KnowledgeBaseDetailPage() {
                         min={100}
                         max={10000}
                         step={100}
-                        className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
                     <div>
@@ -500,7 +435,7 @@ export default function KnowledgeBaseDetailPage() {
                         min={0}
                         max={chunkSize}
                         step={50}
-                        className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
                   </div>
@@ -537,9 +472,7 @@ export default function KnowledgeBaseDetailPage() {
                 {showPreview && Object.keys(previewData).length > 0 && (
                   <div className="mt-3 space-y-3">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-medium text-gray-700">
-                        分块预览
-                      </h4>
+                      <h4 className="text-sm font-medium text-gray-700">分块预览</h4>
                       <button
                         onClick={() => setShowPreview(false)}
                         className="text-xs text-gray-400 hover:text-gray-600"
@@ -550,17 +483,17 @@ export default function KnowledgeBaseDetailPage() {
                     {Object.entries(previewData).map(([docId, preview]) => (
                       <div
                         key={docId}
-                        className="border border-gray-200 rounded-lg overflow-hidden"
+                        className="border border-gray-200 rounded-xl overflow-hidden"
                       >
                         <div className="px-3 py-2 bg-gray-50 flex items-center justify-between">
                           <span className="text-sm font-medium text-gray-700">
-                            {preview.file_name || `文档 #${docId}`}
+                            {(preview as PreviewResult & { file_name?: string }).file_name || `文档 #${docId}`}
                           </span>
                           <span className="text-xs text-gray-500">
                             共 {preview.total_chunks} 个分块
                           </span>
                         </div>
-                        <div className="max-h-96 overflow-y-auto divide-y divide-gray-100">
+                        <div className="max-h-96 overflow-y-auto divide-y divide-gray-100 scrollbar-thin">
                           {preview.chunks.map((chunk, idx) => {
                             const key = `${docId}-${idx}`;
                             const isExpanded = expandedChunks.has(key);
@@ -643,7 +576,7 @@ export default function KnowledgeBaseDetailPage() {
       </div>
 
       {/* Documents List */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-4">
           文档列表
           <span className="text-sm font-normal text-gray-500 ml-2">
@@ -657,7 +590,7 @@ export default function KnowledgeBaseDetailPage() {
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {kb.documents.map((doc) => {
+            {kb.documents.map((doc: DocumentItem) => {
               const lastTask = doc.processing_tasks[doc.processing_tasks.length - 1];
               return (
                 <Link
@@ -679,7 +612,7 @@ export default function KnowledgeBaseDetailPage() {
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {lastTask && <StatusBadge status={lastTask.status} />}
-                    <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded">
+                    <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded hidden sm:inline-block">
                       {doc.content_type}
                     </span>
                     <ChevronRightIcon className="w-4 h-4 text-gray-300" />
@@ -693,11 +626,11 @@ export default function KnowledgeBaseDetailPage() {
 
       {/* Retrieval Test */}
       {kb.documents.length > 0 && (
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-4">
             检索测试
           </h2>
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               value={query}
@@ -706,24 +639,26 @@ export default function KnowledgeBaseDetailPage() {
               placeholder="输入查询语句..."
               className="flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <select
-              value={topK}
-              onChange={(e) => setTopK(Number(e.target.value))}
-              className="border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              {[3, 5, 10, 15, 20].map((n) => (
-                <option key={n} value={n}>
-                  Top {n}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={handleRetrieval}
-              disabled={retrieving || !query.trim()}
-              className="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex-shrink-0"
-            >
-              {retrieving ? "检索中..." : "检索"}
-            </button>
+            <div className="flex gap-2">
+              <select
+                value={topK}
+                onChange={(e) => setTopK(Number(e.target.value))}
+                className="border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                {[3, 5, 10, 15, 20].map((n) => (
+                  <option key={n} value={n}>
+                    Top {n}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={handleRetrieval}
+                disabled={retrieving || !query.trim()}
+                className="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex-shrink-0"
+              >
+                {retrieving ? "检索中..." : "检索"}
+              </button>
+            </div>
           </div>
 
           {retrievalError && (
@@ -737,7 +672,7 @@ export default function KnowledgeBaseDetailPage() {
               {retrievalResults.map((r, i) => (
                 <div
                   key={i}
-                  className="border border-gray-200 rounded-lg p-4"
+                  className="border border-gray-200 rounded-xl p-4"
                 >
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-medium text-gray-500">
@@ -770,56 +705,13 @@ export default function KnowledgeBaseDetailPage() {
           )}
         </div>
       )}
+
+      <Toast
+        message={toast.msg}
+        type={toast.type}
+        visible={toast.show}
+        onClose={() => setToast((p) => ({ ...p, show: false }))}
+      />
     </div>
-  );
-}
-
-/* ---------- icons ---------- */
-
-function ArrowLeftIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-    </svg>
-  );
-}
-
-function EditIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
-    </svg>
-  );
-}
-
-function UploadIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-    </svg>
-  );
-}
-
-function FileIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-    </svg>
-  );
-}
-
-function ChevronRightIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-    </svg>
-  );
-}
-
-function TrashIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-    </svg>
   );
 }

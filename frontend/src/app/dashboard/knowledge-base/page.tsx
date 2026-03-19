@@ -1,35 +1,27 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { api, ApiError } from "@/lib/api";
-
-interface DocumentItem {
-  id: number;
-  file_name: string;
-  file_size: number;
-  content_type: string;
-}
-
-interface KnowledgeBase {
-  id: number;
-  name: string;
-  description: string | null;
-  user_id: number;
-  created_at: string;
-  updated_at: string;
-  documents: DocumentItem[];
-}
+import { knowledgeBaseApi, KnowledgeBase, ApiError } from "@/lib/api";
+import { PlusIcon, BookIcon, FileIcon } from "@/components/icons";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Toast } from "@/components/Toast";
 
 export default function KnowledgeBasePage() {
   const [list, setList] = useState<KnowledgeBase[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<KnowledgeBase | null>(null);
+  const [toast, setToast] = useState({ msg: "", type: "success" as "success" | "error" | "info", show: false });
+
+  const showToast = (msg: string, type: "success" | "error" | "info" = "error") => {
+    setToast({ msg, type, show: true });
+  };
 
   const fetchList = useCallback(async () => {
     try {
       setError("");
-      const data = await api.get("/api/knowledge-base");
+      const data = await knowledgeBaseApi.list();
       setList(data);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "获取列表失败");
@@ -42,17 +34,19 @@ export default function KnowledgeBasePage() {
     fetchList();
   }, [fetchList]);
 
-  const handleDelete = async (kb: KnowledgeBase) => {
-    if (!confirm(`确定要删除知识库「${kb.name}」吗？此操作不可恢复。`)) return;
-
+  const doDelete = async () => {
+    if (!confirmDelete) return;
+    const kb = confirmDelete;
     setDeleting(kb.id);
     try {
-      await api.delete(`/api/knowledge-base/${kb.id}`);
+      await knowledgeBaseApi.delete(kb.id);
       setList((prev) => prev.filter((item) => item.id !== kb.id));
+      showToast("知识库已删除", "success");
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "删除失败");
+      showToast(err instanceof ApiError ? err.message : "删除失败", "error");
     } finally {
       setDeleting(null);
+      setConfirmDelete(null);
     }
   };
 
@@ -91,11 +85,11 @@ export default function KnowledgeBasePage() {
 
       {/* Empty State */}
       {list.length === 0 && !error ? (
-        <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <BookIcon className="w-8 h-8 text-gray-400" />
           </div>
-          <h3 className="text-lg font-medium text-gray-800 mb-2">
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">
             还没有知识库
           </h3>
           <p className="text-gray-500 mb-6 text-sm">
@@ -115,7 +109,7 @@ export default function KnowledgeBasePage() {
           {list.map((kb) => (
             <div
               key={kb.id}
-              className="bg-white rounded-lg border border-gray-200 p-5 hover:shadow-md transition-shadow group"
+              className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow group"
             >
               <div className="flex items-start justify-between mb-3">
                 <Link
@@ -143,20 +137,20 @@ export default function KnowledgeBasePage() {
               <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
                 <Link
                   href={`/dashboard/knowledge-base/${kb.id}`}
-                  className="flex-1 text-center py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                  className="flex-1 text-center py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                 >
                   详情
                 </Link>
                 <Link
                   href={`/dashboard/knowledge-base/${kb.id}/edit`}
-                  className="flex-1 text-center py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                  className="flex-1 text-center py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                   编辑
                 </Link>
                 <button
-                  onClick={() => handleDelete(kb)}
+                  onClick={() => setConfirmDelete(kb)}
                   disabled={deleting === kb.id}
-                  className="flex-1 text-center py-1.5 text-sm text-red-500 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                  className="flex-1 text-center py-1.5 text-sm text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
                 >
                   {deleting === kb.id ? "删除中..." : "删除"}
                 </button>
@@ -165,30 +159,25 @@ export default function KnowledgeBasePage() {
           ))}
         </div>
       )}
+
+      {/* Confirm Delete */}
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="删除知识库"
+        description={`确定要删除知识库「${confirmDelete?.name}」吗？此操作不可恢复，所有关联文档和向量数据将被清除。`}
+        confirmText="删除"
+        variant="danger"
+        loading={deleting !== null}
+        onConfirm={doDelete}
+        onCancel={() => setConfirmDelete(null)}
+      />
+
+      <Toast
+        message={toast.msg}
+        type={toast.type}
+        visible={toast.show}
+        onClose={() => setToast((p) => ({ ...p, show: false }))}
+      />
     </div>
-  );
-}
-
-function PlusIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-    </svg>
-  );
-}
-
-function FileIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-    </svg>
-  );
-}
-
-function BookIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-    </svg>
   );
 }

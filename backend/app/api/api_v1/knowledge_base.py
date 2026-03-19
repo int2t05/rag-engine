@@ -487,6 +487,7 @@ async def cleanup_temp_files(
     清理过期的临时文件。
     """
     from app.models.base import BEIJING_TZ
+
     expired_time = datetime.now(BEIJING_TZ) - timedelta(hours=24)
     expired_uploads = (
         db.query(DocumentUpload).filter(DocumentUpload.created_at < expired_time).all()
@@ -629,7 +630,7 @@ async def test_retrieval(
                 {
                     "content": doc.page_content,  # type: ignore
                     "metadata": doc.metadata,  # type: ignore
-                    "score": float(score),
+                    "score": float(score),  # 余弦距离 = 1 - 余弦相似度
                 }
             )
 

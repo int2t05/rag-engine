@@ -1,12 +1,54 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
+import { BookIcon, ChatIcon, HomeIcon, KeyIcon, LogoutIcon, MenuIcon, XIcon } from "@/components/icons";
 
-const NAV_ITEMS = [
+interface NavItem {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { href: "/dashboard", label: "首页", icon: HomeIcon },
   { href: "/dashboard/knowledge-base", label: "知识库", icon: BookIcon },
   { href: "/dashboard/chat", label: "对话", icon: ChatIcon },
+  { href: "/dashboard/api-keys", label: "API 密钥", icon: KeyIcon },
 ];
+
+const BREADCRUMB_MAP: Record<string, string> = {
+  "/dashboard": "首页",
+  "/dashboard/knowledge-base": "知识库",
+  "/dashboard/knowledge-base/new": "新建知识库",
+  "/dashboard/chat": "对话",
+  "/dashboard/api-keys": "API 密钥",
+};
+
+function getBreadcrumbs(pathname: string) {
+  const segments = pathname.split("/").filter(Boolean);
+  const crumbs: { label: string; href: string }[] = [];
+
+  for (let i = 0; i < segments.length; i++) {
+    const href = "/" + segments.slice(0, i + 1).join("/");
+    const mapped = BREADCRUMB_MAP[href];
+
+    if (mapped) {
+      crumbs.push({ label: mapped, href });
+    } else if (segments[i] === "edit") {
+      crumbs.push({ label: "编辑", href });
+    } else if (segments[i] === "documents") {
+      continue;
+    } else if (i > 0 && segments[i - 1] === "documents") {
+      crumbs.push({ label: "文档详情", href });
+    } else if (/^\d+$/.test(segments[i])) {
+      if (segments[i - 1] === "knowledge-base") {
+        crumbs.push({ label: "知识库详情", href });
+      }
+    }
+  }
+  return crumbs;
+}
 
 export default function DashboardLayout({
   children,
@@ -18,6 +60,24 @@ export default function DashboardLayout({
   const [username, setUsername] = useState("");
   const [ready, setReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const breadcrumbs = useMemo(() => getBreadcrumbs(pathname), [pathname]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("sidebarOpen");
+      if (stored !== null) setSidebarOpen(stored === "true");
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("sidebarOpen", String(sidebarOpen));
+  }, [sidebarOpen]);
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -47,106 +107,140 @@ export default function DashboardLayout({
     );
   }
 
+  const sidebarContent = (
+    <>
+      <div className="h-16 flex items-center justify-between px-5 border-b border-gray-200">
+        <Link href="/dashboard" className="text-lg font-bold text-gray-800">
+          RAG Engine
+        </Link>
+        <button
+          onClick={() => setMobileOpen(false)}
+          className="md:hidden text-gray-400 hover:text-gray-600 p-1"
+        >
+          <XIcon className="w-5 h-5" />
+        </button>
+      </div>
+
+      <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
+        {NAV_ITEMS.map((item) => {
+          const active =
+            item.href === "/dashboard"
+              ? pathname === "/dashboard"
+              : pathname.startsWith(item.href);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                active
+                  ? "bg-blue-50 text-blue-700"
+                  : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+              }`}
+            >
+              <item.icon className="w-5 h-5 flex-shrink-0" />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="border-t border-gray-200 p-4">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">
+            {username.charAt(0).toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-gray-700 truncate">
+              {username}
+            </p>
+          </div>
+          <button
+            onClick={handleLogout}
+            title="退出登录"
+            className="text-gray-400 hover:text-red-500 transition-colors"
+          >
+            <LogoutIcon className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+    </>
+  );
+
   return (
     <div className="min-h-screen flex bg-gray-50">
-      {/* Sidebar */}
+      {/* Desktop Sidebar */}
       <aside
-        className={`${
+        className={`hidden md:flex ${
           sidebarOpen ? "w-60" : "w-0 overflow-hidden"
-        } flex-shrink-0 bg-white border-r border-gray-200 transition-all duration-200 flex flex-col`}
+        } flex-shrink-0 bg-white border-r border-gray-200 transition-all duration-200 flex-col`}
       >
-        <div className="h-16 flex items-center px-5 border-b border-gray-200">
-          <Link href="/dashboard" className="text-lg font-bold text-gray-800">
-            RAG Engine
-          </Link>
-        </div>
-
-        <nav className="flex-1 py-4 px-3 space-y-1">
-          {NAV_ITEMS.map((item) => {
-            const active = pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  active
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                }`}
-              >
-                <item.icon className="w-5 h-5 flex-shrink-0" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="border-t border-gray-200 p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-sm font-bold">
-              {username.charAt(0).toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-700 truncate">
-                {username}
-              </p>
-            </div>
-            <button
-              onClick={handleLogout}
-              title="退出登录"
-              className="text-gray-400 hover:text-red-500 transition-colors"
-            >
-              <LogoutIcon className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
+        {sidebarContent}
       </aside>
 
+      {/* Mobile Sidebar Overlay */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 md:hidden">
+          <div
+            className="fixed inset-0 bg-black/50 animate-fade-in"
+            onClick={() => setMobileOpen(false)}
+          />
+          <aside className="fixed inset-y-0 left-0 w-64 bg-white flex flex-col z-50 animate-slide-in-left shadow-xl">
+            {sidebarContent}
+          </aside>
+        </div>
+      )}
+
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center px-6 gap-4">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        <header className="h-14 shrink-0 bg-white border-b border-gray-200 flex items-center px-4 md:px-6 gap-3">
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="text-gray-500 hover:text-gray-700 transition-colors"
+            onClick={() => {
+              if (window.innerWidth < 768) {
+                setMobileOpen(true);
+              } else {
+                setSidebarOpen(!sidebarOpen);
+              }
+            }}
+            className="text-gray-500 hover:text-gray-700 transition-colors p-1 rounded hover:bg-gray-100"
+            aria-label="切换侧边栏"
           >
             <MenuIcon className="w-5 h-5" />
           </button>
+
+          {/* Breadcrumbs */}
+          {breadcrumbs.length > 1 && (
+            <nav className="hidden sm:flex items-center text-sm text-gray-500">
+              {breadcrumbs.map((crumb, i) => (
+                <span key={crumb.href} className="flex items-center">
+                  {i > 0 && (
+                    <svg className="w-3.5 h-3.5 mx-1.5 text-gray-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                    </svg>
+                  )}
+                  {i === breadcrumbs.length - 1 ? (
+                    <span className="text-gray-800 font-medium">{crumb.label}</span>
+                  ) : (
+                    <Link
+                      href={crumb.href}
+                      className="hover:text-gray-700 transition-colors"
+                    >
+                      {crumb.label}
+                    </Link>
+                  )}
+                </span>
+              ))}
+            </nav>
+          )}
         </header>
 
-        <main className="flex-1 p-6 overflow-auto">{children}</main>
+        <main
+          className={`flex-1 min-h-0 overflow-auto ${
+            pathname === "/dashboard/chat" ? "p-0" : "p-4 md:p-6"
+          }`}
+        >
+          {children}
+        </main>
       </div>
     </div>
-  );
-}
-
-function BookIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-    </svg>
-  );
-}
-
-function ChatIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 11.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
-    </svg>
-  );
-}
-
-function LogoutIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" />
-    </svg>
-  );
-}
-
-function MenuIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-    </svg>
   );
 }

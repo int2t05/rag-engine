@@ -202,3 +202,77 @@ export const authApi = {
   testToken: () =>
     api.post("/api/auth/test-token") as Promise<{ id: number; username: string; email: string }>,
 };
+
+/* ---------- chat ---------- */
+
+export interface ChatMessage {
+  id?: number;
+  role: "user" | "assistant";
+  content: string;
+  chat_id?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Chat {
+  id: number;
+  title: string;
+  user_id: number;
+  created_at: string;
+  updated_at: string;
+  messages: ChatMessage[];
+  knowledge_base_ids: number[];
+}
+
+export const chatApi = {
+  list: (skip = 0, limit = 100) =>
+    api.get(`/api/chat?skip=${skip}&limit=${limit}`) as Promise<Chat[]>,
+
+  get: (id: number) =>
+    api.get(`/api/chat/${id}`) as Promise<Chat>,
+
+  create: (data: { title: string; knowledge_base_ids: number[] }) =>
+    api.post("/api/chat", data) as Promise<Chat>,
+
+  delete: (id: number) =>
+    api.delete(`/api/chat/${id}`) as Promise<{ status: string }>,
+
+  sendMessage: (chatId: number, messages: ChatMessage[]) => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
+    return fetch(`${API_BASE}/api/chat/${chatId}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify({ messages }),
+    });
+  },
+};
+
+/* ---------- api keys ---------- */
+
+export interface ApiKey {
+  id: number;
+  name: string;
+  key: string;
+  is_active: boolean;
+  user_id: number;
+  last_used_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const apiKeyApi = {
+  list: (skip = 0, limit = 100) =>
+    api.get(`/api/api-keys?skip=${skip}&limit=${limit}`) as Promise<ApiKey[]>,
+
+  create: (data: { name: string }) =>
+    api.post("/api/api-keys", data) as Promise<ApiKey>,
+
+  update: (id: number, data: { name?: string; is_active?: boolean }) =>
+    api.put(`/api/api-keys/${id}`, data) as Promise<ApiKey>,
+
+  delete: (id: number) =>
+    api.delete(`/api/api-keys/${id}`) as Promise<ApiKey>,
+};

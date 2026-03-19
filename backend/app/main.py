@@ -11,7 +11,7 @@ import logging
 
 from app.api.api_v1.api import api_router
 
-# from app.api.openapi.api import router as openapi_router
+from app.api.openapi.api import router as openapi_router
 from app.core.config import settings
 from app.core.minio import init_minio
 
@@ -24,6 +24,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+
+# uvicorn app.main:app --reload
 
 # 创建 FastAPI 应用实例
 # title 和 version 会显示在自动生成的 API 文档中
@@ -48,7 +50,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 
 # 注册 OpenAPI 路由（API Key 认证），前缀为 /openapi
 # 供外部系统通过 API Key 调用知识库查询功能
-# app.include_router(openapi_router, prefix="/openapi")
+app.include_router(openapi_router, prefix="/openapi")
 
 
 @app.on_event("startup")

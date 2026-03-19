@@ -58,3 +58,6 @@ class ChromaVectorStore(BaseVectorStore):
         """删除整个集合"""
         self._store._client.delete_collection(self._store._collection.name)
 
+    def count(self) -> int:
+        """返回集合中的文档数量"""
+        return self._store._collection.count()

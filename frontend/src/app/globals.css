@@ -18,3 +18,103 @@ body {
     text-wrap: balance;
   }
 }
+
+/* ---------- animations ---------- */
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(8px); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes pulse-dot {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+.animate-fade-in  { animation: fade-in 0.2s ease-out forwards; }
+.animate-fade-out { animation: fade-out 0.2s ease-in forwards; }
+.animate-scale-in { animation: scale-in 0.2s ease-out forwards; }
+.animate-slide-in-right { animation: slide-in-right 0.25s ease-out forwards; }
+.animate-slide-in-left  { animation: slide-in-left 0.25s ease-out forwards; }
+
+/* ---------- scrollbar ---------- */
+
+.scrollbar-thin::-webkit-scrollbar { width: 5px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 9999px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* ---------- markdown content ---------- */
+
+.md-content { font-size: 0.875rem; line-height: 1.7; color: #1f2937; }
+.md-content .md-p { margin-bottom: 0.5em; }
+.md-content .md-p:last-child { margin-bottom: 0; }
+.md-content .md-h1 { font-size: 1.25rem; font-weight: 700; margin: 1em 0 0.5em; }
+.md-content .md-h2 { font-size: 1.125rem; font-weight: 700; margin: 0.8em 0 0.4em; }
+.md-content .md-h3 { font-size: 1rem; font-weight: 600; margin: 0.6em 0 0.3em; }
+.md-content .md-h4,
+.md-content .md-h5,
+.md-content .md-h6 { font-size: 0.875rem; font-weight: 600; margin: 0.5em 0 0.25em; }
+
+.md-content .md-inline-code {
+  background: #f3f4f6; color: #dc2626; font-size: 0.8125rem;
+  padding: 0.15em 0.4em; border-radius: 4px; font-family: ui-monospace, monospace;
+}
+.md-content .md-code-block {
+  margin: 0.75em 0; border-radius: 8px; overflow: hidden;
+  background: #1e293b; color: #e2e8f0;
+}
+.md-content .md-code-header {
+  padding: 0.375rem 0.75rem; font-size: 0.7rem; text-transform: uppercase;
+  letter-spacing: 0.05em; color: #94a3b8; background: #0f172a;
+  border-bottom: 1px solid #334155;
+}
+.md-content .md-code-block pre {
+  padding: 0.75rem; overflow-x: auto; font-size: 0.8125rem;
+  line-height: 1.6; font-family: ui-monospace, monospace;
+}
+.md-content .md-link {
+  color: #2563eb; text-decoration: underline;
+  text-decoration-color: #93c5fd; text-underline-offset: 2px;
+}
+.md-content .md-link:hover { text-decoration-color: #2563eb; }
+.md-content .md-citation {
+  color: #2563eb; font-size: 0.7rem; font-weight: 600; cursor: default;
+}
+.md-content .md-ul,
+.md-content .md-ol { padding-left: 1.5em; margin: 0.4em 0; }
+.md-content .md-ul { list-style: disc; }
+.md-content .md-ol { list-style: decimal; }
+.md-content .md-ul li,
+.md-content .md-ol li { margin: 0.15em 0; }
+.md-content .md-blockquote {
+  border-left: 3px solid #d1d5db; padding: 0.25em 0 0.25em 0.75em;
+  color: #6b7280; margin: 0.5em 0;
+}
+.md-content .md-hr {
+  border: none; border-top: 1px solid #e5e7eb; margin: 0.75em 0;
+}
+
+/* user message markdown overrides */
+.md-content-user { color: #ffffff; }
+.md-content-user .md-inline-code { background: rgba(255,255,255,0.2); color: #ffffff; }
+.md-content-user .md-link { color: #bfdbfe; text-decoration-color: #60a5fa; }
+.md-content-user .md-link:hover { text-decoration-color: #bfdbfe; }
+.md-content-user .md-citation { color: #bfdbfe; }
+.md-content-user .md-blockquote { border-left-color: rgba(255,255,255,0.3); color: rgba(255,255,255,0.8); }
+.md-content-user .md-hr { border-top-color: rgba(255,255,255,0.2); }

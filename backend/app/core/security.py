@@ -21,7 +21,8 @@ from fastapi.security import OAuth2PasswordBearer, APIKeyHeader
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.user import User
-# from app.services.api_key import APIKeyService
+
+from app.services.api_key import APIKeyService
 
 # OAuth2 密码模式的 Token 获取 URL
 # FastAPI 会自动在 Swagger UI 中添加"Authorize"按钮
@@ -36,7 +37,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     验证明文密码与哈希密码是否匹配
     bcrypt 会自动处理盐值（salt），无需手动管理
     """
-    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    return bcrypt.checkpw(
+        plain_password.encode("utf-8"), hashed_password.encode("utf-8")
+    )
 
 
 def get_password_hash(password: str) -> str:
@@ -62,15 +65,18 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.utcnow() + timedelta(
+            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+        )
     to_encode.update({"exp": expire})  # 添加过期时间声明
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-    return encoded_jwt 
+    encoded_jwt = jwt.encode(
+        to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
+    )
+    return encoded_jwt
 
 
 def get_current_user(
-    db: Session = Depends(get_db),
-    token: str = Depends(oauth2_scheme)
+    db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)
 ) -> User:
     """
     从 JWT Token 中解析出当前用户（依赖注入函数）
@@ -91,62 +97,64 @@ def get_current_user(
     )
     try:
         # 解码 JWT Token
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        username: str = payload.get("sub") # type: ignore
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
+        username: str = payload.get("sub")  # type: ignore
         if username is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    
+
     # 从数据库查找用户
     user = db.query(User).filter(User.username == username).first()
     if user is None:
         raise credentials_exception
-    if not user.is_active: # type: ignore
+    if not user.is_active:  # type: ignore
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Inactive user",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return user 
+    return user
 
 
-# def get_api_key_user(
-#     db: Session = Depends(get_db),
-#     api_key: str = Security(api_key_header),
-# ) -> User:
-#     """
-#     从 API Key 中解析出对应的用户（依赖注入函数）
+def get_api_key_user(
+    db: Session = Depends(get_db),
+    api_key: str = Security(api_key_header),
+) -> User:
+    """
+    从 API Key 中解析出对应的用户（依赖注入函数）
 
-#     用于 OpenAPI 路由，外部系统通过 X-API-Key 请求头进行认证
-#     与 JWT 认证不同，API Key 是长期有效的密钥
+    用于 OpenAPI 路由，外部系统通过 X-API-Key 请求头进行认证
+    与 JWT 认证不同，API Key 是长期有效的密钥
 
-#     流程：
-#     1. 从请求头 X-API-Key 提取 API Key
-#     2. 在数据库中查找匹配的 API Key 记录
-#     3. 验证 API Key 存在且为活跃状态
-#     4. 更新 API Key 最后使用时间
-#     5. 返回关联的用户对象
-#     """
-#     if not api_key:
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="API key header missing",
-#         )
-    
-#     api_key_obj = APIKeyService.get_api_key_by_key(db=db, key=api_key)
-#     if not api_key_obj:
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Invalid API key",
-#         )
-    
-#     if not api_key_obj.is_active:
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Inactive API key",
-#         )
-    
-#     # 更新最后使用时间，用于审计和统计
-#     APIKeyService.update_last_used(db=db, api_key=api_key_obj)
-#     return api_key_obj.user
+    流程：
+    1. 从请求头 X-API-Key 提取 API Key
+    2. 在数据库中查找匹配的 API Key 记录
+    3. 验证 API Key 存在且为活跃状态
+    4. 更新 API Key 最后使用时间
+    5. 返回关联的用户对象
+    """
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API密钥头丢失",
+        )
+
+    api_key_obj = APIKeyService.get_api_key_by_key(db=db, key=api_key)
+    if not api_key_obj:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="未激活API密钥",
+        )
+
+    if not api_key_obj.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="未激活API密钥",
+        )
+
+    # 更新最后使用时间，用于审计和统计
+    APIKeyService.update_last_used(db=db, api_key=api_key_obj)
+    return api_key_obj.user

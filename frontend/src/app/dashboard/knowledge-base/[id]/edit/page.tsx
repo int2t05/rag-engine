@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { api, ApiError } from "@/lib/api";
+import { knowledgeBaseApi, ApiError } from "@/lib/api";
+import { ArrowLeftIcon } from "@/components/icons";
 
 export default function EditKnowledgeBasePage() {
   const router = useRouter();
@@ -18,7 +19,7 @@ export default function EditKnowledgeBasePage() {
   useEffect(() => {
     (async () => {
       try {
-        const data = await api.get(`/api/knowledge-base/${id}`);
+        const data = await knowledgeBaseApi.get(Number(id));
         setName(data.name);
         setDescription(data.description || "");
       } catch (err) {
@@ -40,7 +41,7 @@ export default function EditKnowledgeBasePage() {
     setError("");
 
     try {
-      await api.put(`/api/knowledge-base/${id}`, {
+      await knowledgeBaseApi.update(Number(id), {
         name: name.trim(),
         description: description.trim() || null,
       });
@@ -127,13 +128,5 @@ export default function EditKnowledgeBasePage() {
         </div>
       </form>
     </div>
-  );
-}
-
-function ArrowLeftIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-    </svg>
   );
 }

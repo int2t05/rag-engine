@@ -26,7 +26,9 @@ chat_knowledge_bases = Table(
     "chat_knowledge_bases",
     Base.metadata,
     Column("chat_id", Integer, ForeignKey("chats.id"), primary_key=True),
-    Column("knowledge_base_id", Integer, ForeignKey("knowledge_bases.id"), primary_key=True),
+    Column(
+        "knowledge_base_id", Integer, ForeignKey("knowledge_bases.id"), primary_key=True
+    ),
 )
 
 
@@ -44,19 +46,20 @@ class Chat(Base, TimestampMixin):
     - user: 创建此对话的用户
     - knowledge_bases: 此对话关联的知识库列表（多对多）
     """
+
     __tablename__ = "chats"
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(255), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
-    messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
+    messages = relationship(
+        "Message", back_populates="chat", cascade="all, delete-orphan"
+    )
     user = relationship("User", back_populates="chats")
     # secondary 指定通过哪个中间表建立多对多关系
     knowledge_bases = relationship(
-        "KnowledgeBase",
-        secondary=chat_knowledge_bases,
-        backref="chats"
+        "KnowledgeBase", secondary=chat_knowledge_bases, backref="chats"
     )
 
 
@@ -75,6 +78,7 @@ class Message(Base, TimestampMixin):
     使用 LONGTEXT 类型存储 content，因为 AI 的回答可能很长，
     特别是包含了 Base64 编码的引用上下文后
     """
+
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True, index=True)

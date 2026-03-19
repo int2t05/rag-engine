@@ -51,3 +51,8 @@ class BaseVectorStore(ABC):
     def delete_collection(self) -> None:
         """删除整个集合"""
         pass
+
+    @abstractmethod
+    def count(self) -> int:
+        """返回集合中的文档数量"""
+        pass
