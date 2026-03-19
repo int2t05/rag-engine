@@ -1,16 +1,17 @@
+/**
+ * @fileoverview 文档详情页面
+ * @description 展示单个文档的详细信息和处理任务记录
+ */
+
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { knowledgeBaseApi, DocumentItem, ApiError } from "@/lib/api";
+import { formatFileSize } from "@/lib/utils";
 import { ArrowLeftIcon, FileIcon } from "@/components/icons";
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-}
-
+/** 状态映射表 */
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   pending: { label: "等待处理", color: "text-yellow-600 bg-yellow-50" },
   processing: { label: "处理中", color: "text-blue-600 bg-blue-50" },
@@ -18,6 +19,9 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
   failed: { label: "失败", color: "text-red-600 bg-red-50" },
 };
 
+/**
+ * 状态标签组件
+ */
 function StatusBadge({ status }: { status: string }) {
   const s = STATUS_MAP[status] ?? {
     label: status,
@@ -32,14 +36,58 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+/**
+ * 信息项组件
+ */
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="text-xs text-gray-500">{label}</span>
+      <p className="text-sm text-gray-800 mt-0.5 font-medium truncate">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * 详情行组件
+ */
+function DetailRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex items-start gap-4">
+      <span className="text-sm text-gray-500 w-36 flex-shrink-0">{label}</span>
+      <span
+        className={`text-sm text-gray-800 break-all ${mono ? "font-mono text-xs leading-5" : ""}`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+// ==================== 主组件 ====================
+
 export default function DocumentDetailPage() {
   const params = useParams();
   const kbId = params.id as string;
   const docId = params.docId as string;
 
+  // ==================== 状态定义 ====================
+
   const [doc, setDoc] = useState<DocumentItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // ==================== 数据获取 ====================
 
   const fetchDocument = useCallback(async () => {
     try {
@@ -56,6 +104,8 @@ export default function DocumentDetailPage() {
   useEffect(() => {
     fetchDocument();
   }, [fetchDocument]);
+
+  // ==================== 渲染 ====================
 
   if (loading) {
     return (
@@ -86,6 +136,7 @@ export default function DocumentDetailPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {/* ========== 返回链接 ========== */}
       <Link
         href={`/dashboard/knowledge-base/${kbId}`}
         className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1"
@@ -94,7 +145,7 @@ export default function DocumentDetailPage() {
         返回知识库
       </Link>
 
-      {/* Document Info */}
+      {/* ========== 文档信息 ========== */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <div className="flex items-start gap-4 mb-6">
           <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -125,7 +176,7 @@ export default function DocumentDetailPage() {
         </div>
       </div>
 
-      {/* File Details */}
+      {/* ========== 文件详情 ========== */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-4">文件信息</h2>
         <div className="space-y-3">
@@ -135,7 +186,7 @@ export default function DocumentDetailPage() {
         </div>
       </div>
 
-      {/* Processing Tasks */}
+      {/* ========== 处理任务记录 ========== */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-4">
           处理任务记录
@@ -195,38 +246,6 @@ export default function DocumentDetailPage() {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function InfoItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <span className="text-xs text-gray-500">{label}</span>
-      <p className="text-sm text-gray-800 mt-0.5 font-medium truncate">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function DetailRow({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex items-start gap-4">
-      <span className="text-sm text-gray-500 w-36 flex-shrink-0">{label}</span>
-      <span
-        className={`text-sm text-gray-800 break-all ${mono ? "font-mono text-xs leading-5" : ""}`}
-      >
-        {value}
-      </span>
     </div>
   );
 }

@@ -89,8 +89,8 @@ async def generate_response(
 
         if not vector_stores:
             error_msg = "我没有任何知识基础来帮助回答你的问题。"
-            yield f'0:"{error_msg}"\n'
-            yield 'd:{"finishReason":"stop","usage":{"promptTokens":0,"completionTokens":0}}\n'
+            yield f"data: {json.dumps({'text': error_msg})}\n"
+            yield "data: [DONE]\n"
             bot_message.content = error_msg  # type: ignore
             db.commit()
             return
@@ -178,7 +178,7 @@ async def generate_response(
                 serializable_context = []
                 for context in chunk["context"]:  # document对象
                     serializable_doc = {
-                        "page_content": context.page_content.replace('"', '\\"'),
+                        "page_content": context.page_content,
                         "metadata": context.metadata,
                     }
                     serializable_context.append(serializable_doc)
@@ -187,15 +187,14 @@ async def generate_response(
                 base64_context = base64.b64encode(escaped_context.encode()).decode()
                 separator = "__LLM_RESPONSE__"
 
-                yield f'0:"{base64_context}{separator}"\n'
+                yield f"data: {json.dumps({'text': base64_context + separator})}\n"
                 full_response += base64_context + separator
 
             # 7b. 再流式返回 LLM 回答
             if "answer" in chunk:
                 answer_chunk = chunk["answer"]
                 full_response += answer_chunk
-                escaped_chunk = answer_chunk.replace('"', '\\"').replace("\n", "\\n")
-                yield f'0:"{escaped_chunk}"\n'
+                yield f"data: {json.dumps({'text': answer_chunk})}\n"
 
         # 8. 更新数据库中的 AI 消息
         bot_message.content = full_response  # type: ignore
@@ -204,7 +203,7 @@ async def generate_response(
     except Exception as e:
         error_message = f"错误生成响应：{str(e)}"
         print(error_message)
-        yield "3:{text}\n".format(text=error_message)
+        yield f"data: {json.dumps({'text': error_message})}\n"
 
         db.commit()
         if "bot_message" in locals():  # 返回一个字典，包含当前作用域的所有局部变量

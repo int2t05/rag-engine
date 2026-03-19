@@ -1,3 +1,8 @@
+/**
+ * @fileoverview 新建知识库页面
+ * @description 创建新的知识库，填写名称和描述
+ */
+
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -7,13 +12,27 @@ import { ArrowLeftIcon } from "@/components/icons";
 
 export default function NewKnowledgeBasePage() {
   const router = useRouter();
+
+  // ==================== 状态定义 ====================
+
+  /** 知识库名称 */
   const [name, setName] = useState("");
+  /** 知识库描述 */
   const [description, setDescription] = useState("");
+  /** 错误信息 */
   const [error, setError] = useState("");
+  /** 提交状态 */
   const [loading, setLoading] = useState(false);
 
+  // ==================== 事件处理 ====================
+
+  /**
+   * 提交表单
+   */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // 表单验证
     if (!name.trim()) {
       setError("知识库名称不能为空");
       return;
@@ -35,8 +54,11 @@ export default function NewKnowledgeBasePage() {
     }
   };
 
+  // ==================== 渲染 ====================
+
   return (
     <div className="max-w-2xl mx-auto">
+      {/* 返回链接 */}
       <div className="mb-6">
         <Link
           href="/dashboard/knowledge-base"
@@ -48,10 +70,12 @@ export default function NewKnowledgeBasePage() {
         <h1 className="text-2xl font-bold text-gray-800 mt-2">新建知识库</h1>
       </div>
 
+      {/* 表单 */}
       <form
         onSubmit={handleSubmit}
         className="bg-white rounded-lg border border-gray-200 p-6 space-y-5"
       >
+        {/* 名称 */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5">
             知识库名称 <span className="text-red-500">*</span>
@@ -66,6 +90,7 @@ export default function NewKnowledgeBasePage() {
           />
         </div>
 
+        {/* 描述 */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5">
             描述
@@ -79,12 +104,14 @@ export default function NewKnowledgeBasePage() {
           />
         </div>
 
+        {/* 错误提示 */}
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
             {error}
           </div>
         )}
 
+        {/* 操作按钮 */}
         <div className="flex items-center gap-3 pt-2">
           <button
             type="submit"

@@ -1,15 +1,38 @@
+/**
+ * @fileoverview Toast 提示组件
+ * @description 轻量级消息提示组件，支持成功、错误、信息三种类型
+ *
+ * @example
+ * <Toast
+ *   message="操作成功"
+ *   type="success"
+ *   visible={true}
+ *   onClose={() => setVisible(false)}
+ * />
+ */
+
 "use client";
 
 import { useEffect, useState } from "react";
 
 interface ToastProps {
+  /** 提示消息内容 */
   message: string;
+  /** 提示类型 */
   type?: "success" | "error" | "info";
+  /** 是否显示 */
   visible: boolean;
+  /** 关闭回调 */
   onClose: () => void;
+  /** 显示时长（毫秒），默认 2500ms */
   duration?: number;
 }
 
+/**
+ * Toast 提示组件
+ *
+ * @description 在屏幕底部中央显示提示信息，自动隐藏
+ */
 export function Toast({
   message,
   type = "success",
@@ -24,8 +47,12 @@ export function Toast({
       setLeaving(false);
       return;
     }
+
+    // 动画结束后关闭
     const t = setTimeout(() => setLeaving(true), duration - 250);
+    // 完全关闭
     const t2 = setTimeout(onClose, duration);
+
     return () => {
       clearTimeout(t);
       clearTimeout(t2);
@@ -34,12 +61,14 @@ export function Toast({
 
   if (!visible) return null;
 
+  // 类型对应的样式
   const bgMap = {
     success: "bg-green-600",
     error: "bg-red-600",
     info: "bg-blue-600",
   };
 
+  // 类型对应的图标
   const iconMap = {
     success: (
       <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -62,6 +91,7 @@ export function Toast({
     <div
       className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-4 py-3 rounded-lg text-white text-sm font-medium shadow-lg ${bgMap[type]} ${leaving ? "animate-fade-out" : "animate-fade-in"}`}
       role="alert"
+      aria-live="polite"
     >
       {iconMap[type]}
       {message}

@@ -1,3 +1,13 @@
+/**
+ * @fileoverview SVG 图标组件库
+ * @description 项目中使用的 SVG 图标组件，统一封装方便复用
+ *
+ * 使用方式：
+ * import { PlusIcon, TrashIcon } from "@/components/icons";
+ * <PlusIcon className="w-4 h-4" />
+ */
+
+/** 加号图标 */
 export function PlusIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -6,6 +16,7 @@ export function PlusIcon({ className }: { className?: string }) {
   );
 }
 
+/** 垃圾桶图标 */
 export function TrashIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -14,6 +25,7 @@ export function TrashIcon({ className }: { className?: string }) {
   );
 }
 
+/** 聊天图标 */
 export function ChatIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -22,6 +34,7 @@ export function ChatIcon({ className }: { className?: string }) {
   );
 }
 
+/** 书籍/知识库图标 */
 export function BookIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -30,6 +43,7 @@ export function BookIcon({ className }: { className?: string }) {
   );
 }
 
+/** 密钥图标 */
 export function KeyIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -38,6 +52,7 @@ export function KeyIcon({ className }: { className?: string }) {
   );
 }
 
+/** 复制图标 */
 export function CopyIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -46,6 +61,7 @@ export function CopyIcon({ className }: { className?: string }) {
   );
 }
 
+/** 关闭图标 */
 export function XIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -54,14 +70,16 @@ export function XIcon({ className }: { className?: string }) {
   );
 }
 
+/** 文件图标 */
 export function FileIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9Z" />
     </svg>
   );
 }
 
+/** 返回/左箭头图标 */
 export function ArrowLeftIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -70,6 +88,7 @@ export function ArrowLeftIcon({ className }: { className?: string }) {
   );
 }
 
+/** 编辑图标 */
 export function EditIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -78,6 +97,7 @@ export function EditIcon({ className }: { className?: string }) {
   );
 }
 
+/** 上传图标 */
 export function UploadIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -86,6 +106,7 @@ export function UploadIcon({ className }: { className?: string }) {
   );
 }
 
+/** 右箭头/ chevron 图标 */
 export function ChevronRightIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -94,6 +115,7 @@ export function ChevronRightIcon({ className }: { className?: string }) {
   );
 }
 
+/** 菜单图标 */
 export function MenuIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -102,6 +124,7 @@ export function MenuIcon({ className }: { className?: string }) {
   );
 }
 
+/** 登出图标 */
 export function LogoutIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -110,6 +133,7 @@ export function LogoutIcon({ className }: { className?: string }) {
   );
 }
 
+/** 首页/主页图标 */
 export function HomeIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -118,10 +142,11 @@ export function HomeIcon({ className }: { className?: string }) {
   );
 }
 
+/** 文档图标 */
 export function DocumentIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9Z" />
     </svg>
   );
 }

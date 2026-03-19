@@ -1,3 +1,15 @@
+/**
+ * @fileoverview 知识库列表页面
+ * @description 展示用户的所有知识库，支持创建、查看、编辑、删除操作
+ *
+ * 功能列表：
+ * - 知识库列表展示（卡片形式）
+ * - 新建知识库
+ * - 查看知识库详情
+ * - 编辑知识库
+ * - 删除知识库（带确认）
+ */
+
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
@@ -7,17 +19,40 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Toast } from "@/components/Toast";
 
 export default function KnowledgeBasePage() {
+  // ==================== 状态定义 ====================
+
+  /** 知识库列表 */
   const [list, setList] = useState<KnowledgeBase[]>([]);
+  /** 加载状态 */
   const [loading, setLoading] = useState(true);
+  /** 错误信息 */
   const [error, setError] = useState("");
+  /** 正在删除的知识库 ID */
   const [deleting, setDeleting] = useState<number | null>(null);
+  /** 删除确认弹窗 */
   const [confirmDelete, setConfirmDelete] = useState<KnowledgeBase | null>(null);
-  const [toast, setToast] = useState({ msg: "", type: "success" as "success" | "error" | "info", show: false });
+  /** Toast 提示 */
+  const [toast, setToast] = useState({
+    msg: "",
+    type: "success" as "success" | "error" | "info",
+    show: false,
+  });
 
-  const showToast = (msg: string, type: "success" | "error" | "info" = "error") => {
-    setToast({ msg, type, show: true });
-  };
+  // ==================== 工具函数 ====================
 
+  /** 显示 Toast */
+  const showToast = useCallback(
+    (msg: string, type: "success" | "error" | "info" = "error") => {
+      setToast({ msg, type, show: true });
+    },
+    [],
+  );
+
+  // ==================== 数据获取 ====================
+
+  /**
+   * 获取知识库列表
+   */
   const fetchList = useCallback(async () => {
     try {
       setError("");
@@ -34,7 +69,12 @@ export default function KnowledgeBasePage() {
     fetchList();
   }, [fetchList]);
 
-  const doDelete = async () => {
+  // ==================== 事件处理 ====================
+
+  /**
+   * 确认删除知识库
+   */
+  const doDelete = useCallback(async () => {
     if (!confirmDelete) return;
     const kb = confirmDelete;
     setDeleting(kb.id);
@@ -48,7 +88,9 @@ export default function KnowledgeBasePage() {
       setDeleting(null);
       setConfirmDelete(null);
     }
-  };
+  }, [confirmDelete, showToast]);
+
+  // ==================== 渲染 ====================
 
   if (loading) {
     return (
@@ -60,7 +102,7 @@ export default function KnowledgeBasePage() {
 
   return (
     <div className="max-w-5xl mx-auto">
-      {/* Header */}
+      {/* ========== 页面标题栏 ========== */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">知识库管理</h1>
@@ -77,13 +119,14 @@ export default function KnowledgeBasePage() {
         </Link>
       </div>
 
+      {/* ========== 错误提示 ========== */}
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 text-sm">
           {error}
         </div>
       )}
 
-      {/* Empty State */}
+      {/* ========== 空状态 ========== */}
       {list.length === 0 && !error ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
           <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -104,13 +147,14 @@ export default function KnowledgeBasePage() {
           </Link>
         </div>
       ) : (
-        /* Card Grid */
+        /* ========== 知识库卡片网格 ========== */
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {list.map((kb) => (
             <div
               key={kb.id}
               className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow group"
             >
+              {/* 标题 */}
               <div className="flex items-start justify-between mb-3">
                 <Link
                   href={`/dashboard/knowledge-base/${kb.id}`}
@@ -120,10 +164,12 @@ export default function KnowledgeBasePage() {
                 </Link>
               </div>
 
+              {/* 描述 */}
               <p className="text-sm text-gray-500 mb-3 line-clamp-2 min-h-[2.5rem]">
                 {kb.description || "暂无描述"}
               </p>
 
+              {/* 元信息 */}
               <div className="flex items-center gap-3 text-xs text-gray-400 mb-4">
                 <span className="inline-flex items-center gap-1">
                   <FileIcon className="w-3.5 h-3.5" />
@@ -134,6 +180,7 @@ export default function KnowledgeBasePage() {
                 </span>
               </div>
 
+              {/* 操作按钮 */}
               <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
                 <Link
                   href={`/dashboard/knowledge-base/${kb.id}`}
@@ -160,7 +207,7 @@ export default function KnowledgeBasePage() {
         </div>
       )}
 
-      {/* Confirm Delete */}
+      {/* ========== 删除确认弹窗 ========== */}
       <ConfirmDialog
         open={!!confirmDelete}
         title="删除知识库"
@@ -172,6 +219,7 @@ export default function KnowledgeBasePage() {
         onCancel={() => setConfirmDelete(null)}
       />
 
+      {/* ========== Toast 提示 ========== */}
       <Toast
         message={toast.msg}
         type={toast.type}

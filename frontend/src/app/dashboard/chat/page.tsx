@@ -1,42 +1,145 @@
+/**
+ * @fileoverview 聊天页面
+ * @description RAG 对话主界面，提供聊天、对话管理、引用展示等功能
+ *
+ * 功能列表：
+ * - 对话列表管理（创建、选择、删除）
+ * - 实时流式对话
+ * - Markdown 消息渲染
+ * - 引用来源展示
+ * - 响应式移动端适配
+ */
+
 "use client";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { chatApi, knowledgeBaseApi, Chat, ChatMessage, ApiError } from "@/lib/api";
-import { PlusIcon, TrashIcon, ChatIcon, XIcon } from "@/components/icons";
-import { Markdown } from "@/components/Markdown";
+import { ChatIcon, XIcon } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Toast } from "@/components/Toast";
+import {
+  ChatList,
+  MessageBubble,
+  LoadingDots,
+  NewChatModal,
+  KbOption,
+  EnrichedMessage,
+} from "@/components/chat";
 
-interface KbOption {
-  id: number;
-  name: string;
+// ==================== 类型定义 ====================
+
+/** 引用来源类型（页面内部使用，与 api.ts 保持一致） */
+interface Citation {
+  index: number;
+  page_content: string;
+  metadata: Record<string, unknown>;
 }
 
+// ==================== 工具函数 ====================
+
+/**
+ * 从消息内容中解析引用上下文
+ * @description 后端返回格式: Base64(上下文 JSON) + "__LLM_RESPONSE__" + LLM 回复
+ *
+ * @param content - 原始消息内容
+ * @returns 解析后的文本和引用列表
+ */
+function parseCitationsFromContent(
+  content: string,
+): { text: string; citations: Citation[] } {
+  const citations: Citation[] = [];
+
+  if (!content.includes("__LLM_RESPONSE__")) {
+    return { text: content, citations };
+  }
+
+  const parts = content.split("__LLM_RESPONSE__");
+  const contextBase64 = parts[0];
+  const llmResponse = parts.slice(1).join("__LLM_RESPONSE__");
+
+  try {
+    const decodedContext = JSON.parse(atob(contextBase64));
+    if (decodedContext.context && Array.isArray(decodedContext.context)) {
+      citations.push(
+        ...decodedContext.context.map((doc: Record<string, unknown>, idx: number) => ({
+          index: idx + 1,
+          page_content: doc.page_content as string,
+          metadata: (doc.metadata as Record<string, unknown>) || {},
+        })),
+      );
+    }
+  } catch {
+    // 上下文解析失败，仅返回 LLM 回复
+  }
+
+  return { text: llmResponse, citations };
+}
+
+// ==================== 主组件 ====================
+
 export default function ChatPage() {
+  // ==================== 状态定义 ====================
+
+  /** 对话列表 */
   const [chats, setChats] = useState<Chat[]>([]);
-  const [loading, setLoading] = useState(true);
+  /** 当前选中的对话 */
   const [currentChat, setCurrentChat] = useState<Chat | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /** 消息列表 */
+  const [messages, setMessages] = useState<EnrichedMessage[]>([]);
+
+  /** 用户输入 */
   const [input, setInput] = useState("");
+  /** 是否正在发送消息 */
   const [sending, setSending] = useState(false);
+  /** 是否正在流式接收 */
   const [streaming, setStreaming] = useState(false);
+
+  /** 新建对话弹窗 */
   const [showNewChat, setShowNewChat] = useState(false);
   const [newChatTitle, setNewChatTitle] = useState("");
   const [selectedKbs, setSelectedKbs] = useState<number[]>([]);
-  const [kbOptions, setKbOptions] = useState<KbOption[]>([]);
   const [creatingChat, setCreatingChat] = useState(false);
+
+  /** 知识库选项 */
+  const [kbOptions, setKbOptions] = useState<KbOption[]>([]);
+
+  /** 移动端侧边栏 */
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-  const [toast, setToast] = useState({ msg: "", type: "error" as "success" | "error" | "info", show: false });
-  const [confirmDelete, setConfirmDelete] = useState<Chat | null>(null);
+  /** 表单验证错误 */
   const [formError, setFormError] = useState("");
 
+  /** 删除确认 */
+  const [confirmDelete, setConfirmDelete] = useState<Chat | null>(null);
+
+  /** Toast 提示 */
+  const [toast, setToast] = useState({
+    msg: "",
+    type: "error" as "success" | "error" | "info",
+    show: false,
+  });
+
+  /** 页面加载状态 */
+  const [loading, setLoading] = useState(true);
+
+  // ==================== Refs ====================
+
+  /** 消息列表末尾引用 */
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  /** 输入框引用 */
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const showToast = (msg: string, type: "success" | "error" | "info" = "error") => {
-    setToast({ msg, type, show: true });
-  };
+  // ==================== 工具函数 ====================
 
+  /** 显示 Toast 提示 */
+  const showToast = useCallback((msg: string, type: "success" | "error" | "info" = "error") => {
+    setToast({ msg, type, show: true });
+  }, []);
+
+  // ==================== 数据获取 ====================
+
+  /**
+   * 获取对话列表
+   */
   const fetchChats = useCallback(async () => {
     try {
       const data = await chatApi.list();
@@ -46,38 +149,65 @@ export default function ChatPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showToast]);
 
+  /**
+   * 获取知识库选项（用于新建对话）
+   */
   const fetchKbOptions = useCallback(async () => {
     try {
       const data = await knowledgeBaseApi.list();
-      setKbOptions(data.map((kb: any) => ({ id: kb.id, name: kb.name })));
+      setKbOptions(data.map((kb) => ({ id: kb.id, name: kb.name })));
     } catch {
-      // silently fail
+      // 静默失败
     }
   }, []);
+
+  // ==================== 副作用 ====================
 
   useEffect(() => {
     fetchChats();
     fetchKbOptions();
   }, [fetchChats, fetchKbOptions]);
 
+  /** 自动滚动到最新消息 */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSelectChat = async (chat: Chat) => {
-    try {
-      const fullChat = await chatApi.get(chat.id);
-      setCurrentChat(fullChat);
-      setMessages(fullChat.messages || []);
-      setMobileSidebarOpen(false);
-    } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "获取对话详情失败");
-    }
-  };
+  // ==================== 事件处理 ====================
 
-  const handleCreateChat = async () => {
+  /**
+   * 选择对话
+   */
+  const handleSelectChat = useCallback(
+    async (chat: Chat) => {
+      try {
+        const fullChat = await chatApi.get(chat.id);
+        setCurrentChat(fullChat);
+
+        // 解析历史消息中的引用
+        const parsedMessages: EnrichedMessage[] = (fullChat.messages || []).map((msg) => {
+          if (msg.role === "assistant" && msg.content.includes("__LLM_RESPONSE__")) {
+            const { text, citations } = parseCitationsFromContent(msg.content);
+            return { ...msg, content: text, citations, _clientId: msg.id ? undefined : crypto.randomUUID() };
+          }
+          return { ...msg, citations: [] as Citation[], _clientId: msg.id ? undefined : crypto.randomUUID() };
+        });
+
+        setMessages(parsedMessages);
+        setMobileSidebarOpen(false);
+      } catch (err) {
+        showToast(err instanceof ApiError ? err.message : "获取对话详情失败");
+      }
+    },
+    [showToast],
+  );
+
+  /**
+   * 创建新对话
+   */
+  const handleCreateChat = useCallback(async () => {
     if (!newChatTitle.trim()) {
       setFormError("请输入对话标题");
       return;
@@ -105,12 +235,50 @@ export default function ChatPage() {
     } finally {
       setCreatingChat(false);
     }
-  };
+  }, [newChatTitle, selectedKbs]);
 
-  const handleSendMessage = async () => {
+  /**
+   * 切换知识库选中状态
+   */
+  const handleKbToggle = useCallback((kbId: number) => {
+    setSelectedKbs((prev) =>
+      prev.includes(kbId) ? prev.filter((id) => id !== kbId) : [...prev, kbId],
+    );
+  }, []);
+
+  /**
+   * 删除对话
+   */
+  const doDeleteChat = useCallback(async () => {
+    if (!confirmDelete) return;
+    const chat = confirmDelete;
+    try {
+      await chatApi.delete(chat.id);
+      setChats((prev) => prev.filter((c) => c.id !== chat.id));
+      if (currentChat?.id === chat.id) {
+        setCurrentChat(null);
+        setMessages([]);
+      }
+      showToast("对话已删除", "success");
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "删除对话失败");
+    } finally {
+      setConfirmDelete(null);
+    }
+  }, [confirmDelete, currentChat, showToast]);
+
+  /**
+   * 发送消息
+   */
+  const handleSendMessage = useCallback(async () => {
     if (!input.trim() || !currentChat || sending) return;
 
-    const userMsg: ChatMessage = { role: "user", content: input.trim() };
+    const userMsg: EnrichedMessage = {
+      role: "user",
+      content: input.trim(),
+      citations: [],
+      _clientId: crypto.randomUUID(),
+    };
     const prevMessages = [...messages];
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
@@ -118,9 +286,13 @@ export default function ChatPage() {
     setStreaming(false);
 
     try {
-      const allMessages = [...prevMessages, userMsg];
+      const allMessages: ChatMessage[] = [
+        ...prevMessages.map((m) => ({ role: m.role, content: m.content })),
+        { role: "user", content: userMsg.content },
+      ];
       const response = await chatApi.sendMessage(currentChat.id, allMessages);
 
+      // 处理 401 未授权
       if (response.status === 401) {
         if (typeof window !== "undefined") {
           localStorage.removeItem("token");
@@ -143,9 +315,19 @@ export default function ChatPage() {
 
       const decoder = new TextDecoder();
       let fullContent = "";
-      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+      let citations: Citation[] = [];
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "",
+          citations: [],
+          _clientId: crypto.randomUUID(),
+        },
+      ]);
       setStreaming(true);
 
+      // 流式读取响应
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -161,26 +343,60 @@ export default function ChatPage() {
           try {
             const parsed = JSON.parse(data);
             if (parsed.text) {
-              fullContent += parsed.text;
-              const snapshot = fullContent;
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: snapshot,
-                };
-                return updated;
-              });
+              let text = parsed.text;
+
+              // 解析引用上下文
+              if (text.includes("__LLM_RESPONSE__")) {
+                const parts = text.split("__LLM_RESPONSE__");
+                const contextBase64 = parts[0];
+                const llmResponse = parts.slice(1).join("__LLM_RESPONSE__");
+
+                try {
+                  const decodedContext = JSON.parse(atob(contextBase64));
+                  if (decodedContext.context && Array.isArray(decodedContext.context)) {
+                    citations = decodedContext.context.map(
+                      (doc: Record<string, unknown>, idx: number) => ({
+                        index: idx + 1,
+                        page_content: doc.page_content as string,
+                        metadata: (doc.metadata as Record<string, unknown>) || {},
+                      }),
+                    );
+                  }
+                } catch {
+                  // 上下文解析失败，忽略
+                }
+
+                text = llmResponse;
+              }
+
+              if (text) {
+                fullContent += text;
+                const snapshot = fullContent;
+                const snapshotCitations = citations;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = {
+                    role: "assistant",
+                    content: snapshot,
+                    citations: snapshotCitations,
+                  };
+                  return updated;
+                });
+              }
             }
           } catch {
-            // skip parse errors
+            // 跳过解析错误
           }
         }
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "发送消息失败");
       setMessages((prev) => {
-        if (prev.length > 0 && prev[prev.length - 1].role === "assistant" && !prev[prev.length - 1].content) {
+        if (
+          prev.length > 0 &&
+          prev[prev.length - 1].role === "assistant" &&
+          !prev[prev.length - 1].content
+        ) {
           return prev.slice(0, -1);
         }
         return prev;
@@ -190,32 +406,30 @@ export default function ChatPage() {
       setStreaming(false);
       inputRef.current?.focus();
     }
-  };
+  }, [input, currentChat, sending, messages, showToast]);
 
-  const doDeleteChat = async () => {
-    if (!confirmDelete) return;
-    const chat = confirmDelete;
-    try {
-      await chatApi.delete(chat.id);
-      setChats((prev) => prev.filter((c) => c.id !== chat.id));
-      if (currentChat?.id === chat.id) {
-        setCurrentChat(null);
-        setMessages([]);
+  /**
+   * 键盘事件处理
+   */
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSendMessage();
       }
-      showToast("对话已删除", "success");
-    } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "删除对话失败");
-    } finally {
-      setConfirmDelete(null);
-    }
-  };
+    },
+    [handleSendMessage],
+  );
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
+  /**
+   * 打开新建对话弹窗
+   */
+  const handleNewChat = useCallback(() => {
+    setShowNewChat(true);
+    setFormError("");
+  }, []);
+
+  // ==================== 渲染 ====================
 
   if (loading) {
     return (
@@ -225,101 +439,74 @@ export default function ChatPage() {
     );
   }
 
-  const chatListContent = (
-    <>
-      <div className="p-3 border-b border-gray-200">
-        <button
-          onClick={() => {
-            setShowNewChat(true);
-            setFormError("");
-          }}
-          className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-        >
-          <PlusIcon className="w-4 h-4" />
-          新建对话
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto scrollbar-thin">
-        {chats.length === 0 ? (
-          <div className="p-4 text-center text-gray-400 text-sm">
-            暂无对话记录
-          </div>
-        ) : (
-          <div className="p-2 space-y-0.5">
-            {chats.map((chat) => (
-              <div
-                key={chat.id}
-                onClick={() => handleSelectChat(chat)}
-                className={`group p-3 rounded-lg cursor-pointer transition-colors ${
-                  currentChat?.id === chat.id
-                    ? "bg-blue-50 text-blue-700"
-                    : "hover:bg-gray-100 text-gray-700"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium truncate flex-1">
-                    {chat.title}
-                  </span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setConfirmDelete(chat);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-all p-1 flex-shrink-0"
-                  >
-                    <TrashIcon className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  {new Date(chat.created_at).toLocaleDateString("zh-CN")}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </>
-  );
-
   return (
     <div className="h-full min-h-[calc(100vh-3.5rem)] flex">
-      {/* Desktop Chat List */}
+      {/* ========== 桌面端：固定左侧栏 ========== */}
       <div className="hidden md:flex w-64 bg-white border-r border-gray-200 flex-col flex-shrink-0">
-        {chatListContent}
+        <ChatList
+          chats={chats}
+          currentChat={currentChat}
+          onSelectChat={handleSelectChat}
+          onDeleteChat={(chat) => setConfirmDelete(chat)}
+          onNewChat={handleNewChat}
+        />
       </div>
 
-      {/* Mobile Chat List */}
+      {/* ========== 移动端：可滑动侧边栏 ========== */}
       {mobileSidebarOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
+          {/* 遮罩层 */}
           <div
             className="fixed inset-0 bg-black/50 animate-fade-in"
             onClick={() => setMobileSidebarOpen(false)}
           />
+          {/* 侧边栏内容 */}
           <div className="fixed inset-y-0 left-0 w-72 bg-white flex flex-col z-50 animate-slide-in-left shadow-xl">
+            {/* 侧边栏头部 */}
             <div className="p-3 flex items-center justify-between border-b border-gray-200">
               <span className="text-sm font-semibold text-gray-700">对话列表</span>
-              <button onClick={() => setMobileSidebarOpen(false)} className="text-gray-400 hover:text-gray-600 p-1">
+              <button
+                onClick={() => setMobileSidebarOpen(false)}
+                className="text-gray-400 hover:text-gray-600 p-1"
+              >
                 <XIcon className="w-4 h-4" />
               </button>
             </div>
-            {chatListContent}
+            {/* 聊天列表 */}
+            <ChatList
+              chats={chats}
+              currentChat={currentChat}
+              onSelectChat={handleSelectChat}
+              onDeleteChat={(chat) => setConfirmDelete(chat)}
+              onNewChat={handleNewChat}
+            />
           </div>
         </div>
       )}
 
-      {/* Chat Area */}
+      {/* ========== 主聊天区域 ========== */}
       <div className="flex-1 flex flex-col bg-gray-50 min-w-0">
         {currentChat ? (
           <>
-            {/* Chat Header */}
+            {/* 聊天头部 */}
             <div className="h-12 flex items-center gap-3 px-4 border-b border-gray-200 bg-white flex-shrink-0">
+              {/* 移动端：菜单按钮 */}
               <button
                 onClick={() => setMobileSidebarOpen(true)}
                 className="md:hidden text-gray-500 hover:text-gray-700 p-1"
               >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={1.5}
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+                  />
                 </svg>
               </button>
               <h2 className="text-sm font-semibold text-gray-800 truncate">
@@ -327,7 +514,7 @@ export default function ChatPage() {
               </h2>
             </div>
 
-            {/* Messages */}
+            {/* 消息列表 */}
             <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 scrollbar-thin">
               {messages.length === 0 && (
                 <div className="text-center text-gray-400 py-12 text-sm">
@@ -335,40 +522,16 @@ export default function ChatPage() {
                 </div>
               )}
               {messages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                >
-                  <div
-                    className={`max-w-[85%] md:max-w-2xl rounded-2xl px-4 py-3 ${
-                      msg.role === "user"
-                        ? "bg-blue-600 text-white rounded-br-md"
-                        : "bg-white border border-gray-200 text-gray-800 rounded-bl-md shadow-sm"
-                    }`}
-                  >
-                    {msg.role === "assistant" ? (
-                      <Markdown content={msg.content} />
-                    ) : (
-                      <Markdown content={msg.content} className="md-content-user" />
-                    )}
-                  </div>
-                </div>
+                <MessageBubble
+                  key={msg.id ?? msg._clientId ?? `msg-${idx}`}
+                  message={msg}
+                />
               ))}
-              {sending && !streaming && (
-                <div className="flex justify-start">
-                  <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
-                    <div className="flex gap-1.5 items-center h-5">
-                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                    </div>
-                  </div>
-                </div>
-              )}
+              {sending && !streaming && <LoadingDots />}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Area */}
+            {/* 输入区域 */}
             <div className="p-3 md:p-4 border-t border-gray-200 bg-white">
               <div className="flex gap-2 md:gap-3 items-end max-w-3xl mx-auto">
                 <textarea
@@ -390,14 +553,25 @@ export default function ChatPage() {
                   disabled={!input.trim() || sending}
                   className="p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                 >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={2}
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5"
+                    />
                   </svg>
                 </button>
               </div>
             </div>
           </>
         ) : (
+          /* ========== 未选择对话：空状态 ========== */
           <div className="flex-1 flex items-center justify-center p-6">
             <div className="text-center max-w-xs">
               <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -417,13 +591,9 @@ export default function ChatPage() {
                   查看对话列表
                 </button>
                 <button
-                  onClick={() => {
-                    setShowNewChat(true);
-                    setFormError("");
-                  }}
+                  onClick={handleNewChat}
                   className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
                 >
-                  <PlusIcon className="w-4 h-4" />
                   新建对话
                 </button>
               </div>
@@ -432,94 +602,26 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* New Chat Modal */}
-      {showNewChat && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto animate-scale-in">
-            <h2 className="text-lg font-bold text-gray-900 mb-4">新建对话</h2>
+      {/* ========== 新建对话弹窗 ========== */}
+      <NewChatModal
+        visible={showNewChat}
+        title={newChatTitle}
+        onTitleChange={setNewChatTitle}
+        selectedKbs={selectedKbs}
+        onKbToggle={handleKbToggle}
+        kbOptions={kbOptions}
+        error={formError}
+        loading={creatingChat}
+        onCreate={handleCreateChat}
+        onCancel={() => {
+          setShowNewChat(false);
+          setNewChatTitle("");
+          setSelectedKbs([]);
+          setFormError("");
+        }}
+      />
 
-            {formError && (
-              <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
-                {formError}
-              </div>
-            )}
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  对话标题
-                </label>
-                <input
-                  type="text"
-                  value={newChatTitle}
-                  onChange={(e) => setNewChatTitle(e.target.value)}
-                  placeholder="例如：项目文档问答"
-                  className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  选择知识库（可多选）
-                </label>
-                <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-2">
-                  {kbOptions.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-4">
-                      暂无可用知识库，请先创建知识库并上传文档
-                    </p>
-                  ) : (
-                    kbOptions.map((kb) => (
-                      <label
-                        key={kb.id}
-                        className="flex items-center gap-2.5 p-2 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedKbs.includes(kb.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedKbs((prev) => [...prev, kb.id]);
-                            } else {
-                              setSelectedKbs((prev) =>
-                                prev.filter((id) => id !== kb.id),
-                              );
-                            }
-                          }}
-                          className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                        />
-                        <span className="text-sm text-gray-700">{kb.name}</span>
-                      </label>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowNewChat(false);
-                  setNewChatTitle("");
-                  setSelectedKbs([]);
-                  setFormError("");
-                }}
-                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleCreateChat}
-                disabled={creatingChat}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              >
-                {creatingChat ? "创建中..." : "创建"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Confirm Delete */}
+      {/* ========== 删除确认弹窗 ========== */}
       <ConfirmDialog
         open={!!confirmDelete}
         title="删除对话"
@@ -530,6 +632,7 @@ export default function ChatPage() {
         onCancel={() => setConfirmDelete(null)}
       />
 
+      {/* ========== Toast 提示 ========== */}
       <Toast
         message={toast.msg}
         type={toast.type}

@@ -1,3 +1,8 @@
+/**
+ * @fileoverview 知识库详情页面
+ * @description 展示知识库详情，包含文档上传、预览、处理、检索测试等功能
+ */
+
 "use client";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
@@ -21,14 +26,7 @@ import {
   TrashIcon,
 } from "@/components/icons";
 import { Toast } from "@/components/Toast";
-
-/* ---------- helpers ---------- */
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-}
+import { formatFileSize } from "@/lib/utils";
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   pending: { label: "等待处理", color: "text-yellow-600 bg-yellow-50" },
@@ -47,8 +45,6 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-/* ---------- main page ---------- */
-
 export default function KnowledgeBaseDetailPage() {
   const params = useParams();
   const id = params.id as string;
@@ -58,23 +54,16 @@ export default function KnowledgeBaseDetailPage() {
   const [error, setError] = useState("");
   const [toast, setToast] = useState({ msg: "", type: "success" as "success" | "error" | "info", show: false });
 
-  const showToast = (msg: string, type: "success" | "error" | "info" = "error") => {
-    setToast({ msg, type, show: true });
-  };
-
-  // upload
   const [uploading, setUploading] = useState(false);
   const [uploadResults, setUploadResults] = useState<UploadResult[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // processing
   const [processing, setProcessing] = useState(false);
   const [taskMap, setTaskMap] = useState<Record<number, TaskStatus>>({});
   const [pollingTaskIds, setPollingTaskIds] = useState<number[]>([]);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // preview
   const [chunkSize, setChunkSize] = useState(1000);
   const [chunkOverlap, setChunkOverlap] = useState(200);
   const [previewing, setPreviewing] = useState(false);
@@ -83,17 +72,18 @@ export default function KnowledgeBaseDetailPage() {
   const [showPreview, setShowPreview] = useState(false);
   const [expandedChunks, setExpandedChunks] = useState<Set<string>>(new Set());
 
-  // cleanup
   const [cleaning, setCleaning] = useState(false);
 
-  // retrieval test
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState(5);
   const [retrieving, setRetrieving] = useState(false);
   const [retrievalResults, setRetrievalResults] = useState<RetrievalResult[]>([]);
   const [retrievalError, setRetrievalError] = useState("");
 
-  /* ---------- fetch kb ---------- */
+  const showToast = useCallback((msg: string, type: "success" | "error" | "info" = "error") => {
+    setToast({ msg, type, show: true });
+  }, []);
+
   const fetchKb = useCallback(async () => {
     try {
       setError("");
@@ -110,7 +100,6 @@ export default function KnowledgeBaseDetailPage() {
     fetchKb();
   }, [fetchKb]);
 
-  /* ---------- upload ---------- */
   const handleUpload = async (files: FileList | File[]) => {
     if (!files.length) return;
     setUploading(true);
@@ -138,7 +127,6 @@ export default function KnowledgeBaseDetailPage() {
     if (e.dataTransfer.files) handleUpload(e.dataTransfer.files);
   };
 
-  /* ---------- preview ---------- */
   const handlePreview = async () => {
     const docIds = uploadResults
       .filter((r) => !r.skip_processing)
@@ -165,7 +153,6 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  /* ---------- process ---------- */
   const handleProcess = async () => {
     const toProcess = uploadResults.filter((r) => !r.skip_processing);
     if (!toProcess.length) return;
@@ -187,7 +174,6 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  /* ---------- poll tasks ---------- */
   useEffect(() => {
     if (pollingTaskIds.length === 0) {
       if (pollingRef.current) clearInterval(pollingRef.current);
@@ -213,7 +199,7 @@ export default function KnowledgeBaseDetailPage() {
           showToast("文档处理完成", "success");
         }
       } catch {
-        // ignore polling errors
+        // ignore
       }
     };
 
@@ -222,9 +208,8 @@ export default function KnowledgeBaseDetailPage() {
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
-  }, [pollingTaskIds, id, fetchKb]);
+  }, [pollingTaskIds, id, fetchKb, showToast]);
 
-  /* ---------- cleanup ---------- */
   const handleCleanup = async () => {
     setCleaning(true);
     try {
@@ -237,7 +222,6 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  /* ---------- retrieval test ---------- */
   const handleRetrieval = async () => {
     if (!query.trim()) return;
     setRetrieving(true);
@@ -257,7 +241,6 @@ export default function KnowledgeBaseDetailPage() {
     }
   };
 
-  /* ---------- render ---------- */
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -288,7 +271,6 @@ export default function KnowledgeBaseDetailPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      {/* Back */}
       <Link
         href="/dashboard/knowledge-base"
         className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1"
@@ -297,7 +279,6 @@ export default function KnowledgeBaseDetailPage() {
         返回列表
       </Link>
 
-      {/* KB Info */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-start justify-between mb-4 gap-4">
           <div className="min-w-0">
@@ -334,7 +315,6 @@ export default function KnowledgeBaseDetailPage() {
         </div>
       </div>
 
-      {/* Document Upload */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-800">上传文档</h2>
@@ -386,13 +366,12 @@ export default function KnowledgeBaseDetailPage() {
           />
         </div>
 
-        {/* Upload Results */}
         {uploadResults.length > 0 && (
           <div className="mt-4 space-y-2">
             <h3 className="text-sm font-medium text-gray-700">上传结果</h3>
             {uploadResults.map((r, i) => (
               <div
-                key={i}
+                key={r.upload_id ?? r.document_id ?? `upload-${i}`}
                 className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg text-sm"
               >
                 <div className="flex items-center gap-2 min-w-0">
@@ -402,9 +381,9 @@ export default function KnowledgeBaseDetailPage() {
                 <StatusBadge status={r.status} />
               </div>
             ))}
+
             {pendingUploads.length > 0 && (
               <>
-                {/* Chunk settings */}
                 <div className="mt-3 p-3 bg-gray-50 rounded-xl space-y-3">
                   <h4 className="text-xs font-medium text-gray-600 uppercase tracking-wide">
                     分块参数
@@ -441,7 +420,6 @@ export default function KnowledgeBaseDetailPage() {
                   </div>
                 </div>
 
-                {/* Preview + Process buttons */}
                 <div className="mt-2 flex gap-2">
                   <button
                     onClick={handlePreview}
@@ -461,14 +439,12 @@ export default function KnowledgeBaseDetailPage() {
                   </button>
                 </div>
 
-                {/* Preview error */}
                 {previewError && (
                   <div className="mt-2 bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">
                     {previewError}
                   </div>
                 )}
 
-                {/* Preview results */}
                 {showPreview && Object.keys(previewData).length > 0 && (
                   <div className="mt-3 space-y-3">
                     <div className="flex items-center justify-between">
@@ -480,60 +456,69 @@ export default function KnowledgeBaseDetailPage() {
                         收起
                       </button>
                     </div>
-                    {Object.entries(previewData).map(([docId, preview]) => (
-                      <div
-                        key={docId}
-                        className="border border-gray-200 rounded-xl overflow-hidden"
-                      >
-                        <div className="px-3 py-2 bg-gray-50 flex items-center justify-between">
-                          <span className="text-sm font-medium text-gray-700">
-                            {(preview as PreviewResult & { file_name?: string }).file_name || `文档 #${docId}`}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            共 {preview.total_chunks} 个分块
-                          </span>
-                        </div>
-                        <div className="max-h-96 overflow-y-auto divide-y divide-gray-100 scrollbar-thin">
-                          {preview.chunks.map((chunk, idx) => {
-                            const key = `${docId}-${idx}`;
-                            const isExpanded = expandedChunks.has(key);
-                            return (
-                              <div
-                                key={idx}
-                                className="px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors"
-                                onClick={() => {
-                                  setExpandedChunks((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(key)) next.delete(key);
-                                    else next.add(key);
-                                    return next;
-                                  });
-                                }}
-                              >
-                                <div className="flex items-center justify-between mb-1">
-                                  <span className="text-xs font-mono text-gray-400">
-                                    #{idx + 1}
-                                  </span>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs text-gray-400">
-                                      {chunk.content.length} 字符
-                                    </span>
-                                    <span className="text-xs text-blue-500">
-                                      {isExpanded ? "收起" : "展开"}
-                                    </span>
-                                  </div>
-                                </div>
-                                <p
-                                  className={`text-xs text-gray-600 whitespace-pre-wrap ${isExpanded ? "" : "line-clamp-3"}`}
+                    {Object.entries(previewData).map(([docId, preview]) => {
+                      const uploadResult = uploadResults.find(
+                        (r) => r.upload_id === Number(docId),
+                      );
+                      const fileName =
+                        uploadResult?.file_name || `文档 #${docId}`;
+                      return (
+                        <div
+                          key={docId}
+                          className="border border-gray-200 rounded-xl overflow-hidden"
+                        >
+                          <div className="px-3 py-2 bg-gray-50 flex items-center justify-between">
+                            <span className="text-sm font-medium text-gray-700">
+                              {fileName}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              共 {preview.total_chunks} 个分块
+                            </span>
+                          </div>
+                          <div className="max-h-96 overflow-y-auto divide-y divide-gray-100 scrollbar-thin">
+                            {preview.chunks.map((chunk, idx) => {
+                              const chunkKey = `${docId}-${idx}`;
+                              const isExpanded = expandedChunks.has(chunkKey);
+                              return (
+                                <div
+                                  key={chunkKey}
+                                  className="px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors"
+                                  onClick={() => {
+                                    setExpandedChunks((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(chunkKey)) next.delete(chunkKey);
+                                      else next.add(chunkKey);
+                                      return next;
+                                    });
+                                  }}
                                 >
-                                  {chunk.content}
-                                </p>
-                              </div>
-                            );
-                          })}
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs font-mono text-gray-400">
+                                      #{idx + 1}
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs text-gray-400">
+                                        {chunk.content.length} 字符
+                                      </span>
+                                      <span className="text-xs text-blue-500">
+                                        {isExpanded ? "收起" : "展开"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <p
+                                    className={`text-xs text-gray-600 whitespace-pre-wrap ${
+                                      isExpanded ? "" : "line-clamp-3"
+                                    }`}
+                                  >
+                                    {chunk.content}
+                                  </p>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </>
@@ -541,7 +526,6 @@ export default function KnowledgeBaseDetailPage() {
           </div>
         )}
 
-        {/* Polling status */}
         {isPolling && (
           <div className="mt-4 space-y-2">
             <div className="flex items-center gap-2">
@@ -575,7 +559,6 @@ export default function KnowledgeBaseDetailPage() {
         )}
       </div>
 
-      {/* Documents List */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-4">
           文档列表
@@ -591,7 +574,8 @@ export default function KnowledgeBaseDetailPage() {
         ) : (
           <div className="divide-y divide-gray-100">
             {kb.documents.map((doc: DocumentItem) => {
-              const lastTask = doc.processing_tasks[doc.processing_tasks.length - 1];
+              const lastTask =
+                doc.processing_tasks[doc.processing_tasks.length - 1];
               return (
                 <Link
                   key={doc.id}
@@ -624,7 +608,6 @@ export default function KnowledgeBaseDetailPage() {
         )}
       </div>
 
-      {/* Retrieval Test */}
       {kb.documents.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-4">
@@ -671,7 +654,7 @@ export default function KnowledgeBaseDetailPage() {
             <div className="mt-4 space-y-3">
               {retrievalResults.map((r, i) => (
                 <div
-                  key={i}
+                  key={`retrieval-${i}-${r.score}`}
                   className="border border-gray-200 rounded-xl p-4"
                 >
                   <div className="flex items-center justify-between mb-2">

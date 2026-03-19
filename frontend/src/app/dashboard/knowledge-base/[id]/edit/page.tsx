@@ -1,3 +1,8 @@
+/**
+ * @fileoverview 编辑知识库页面
+ * @description 修改已有知识库的名称和描述
+ */
+
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
@@ -6,16 +11,28 @@ import { knowledgeBaseApi, ApiError } from "@/lib/api";
 import { ArrowLeftIcon } from "@/components/icons";
 
 export default function EditKnowledgeBasePage() {
+  // ==================== 状态定义 ====================
+
+  /** 知识库名称 */
+  const [name, setName] = useState("");
+  /** 知识库描述 */
+  const [description, setDescription] = useState("");
+  /** 错误信息 */
+  const [error, setError] = useState("");
+  /** 提交状态 */
+  const [loading, setLoading] = useState(false);
+  /** 数据加载状态 */
+  const [fetching, setFetching] = useState(true);
+
   const router = useRouter();
   const params = useParams();
   const id = params.id as string;
 
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [fetching, setFetching] = useState(true);
+  // ==================== 副作用 ====================
 
+  /**
+   * 加载知识库数据
+   */
   useEffect(() => {
     (async () => {
       try {
@@ -30,8 +47,14 @@ export default function EditKnowledgeBasePage() {
     })();
   }, [id]);
 
+  // ==================== 事件处理 ====================
+
+  /**
+   * 提交表单
+   */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!name.trim()) {
       setError("知识库名称不能为空");
       return;
@@ -53,6 +76,8 @@ export default function EditKnowledgeBasePage() {
     }
   };
 
+  // ==================== 渲染 ====================
+
   if (fetching) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -63,6 +88,7 @@ export default function EditKnowledgeBasePage() {
 
   return (
     <div className="max-w-2xl mx-auto">
+      {/* 返回链接 */}
       <div className="mb-6">
         <Link
           href={`/dashboard/knowledge-base/${id}`}
@@ -74,10 +100,12 @@ export default function EditKnowledgeBasePage() {
         <h1 className="text-2xl font-bold text-gray-800 mt-2">编辑知识库</h1>
       </div>
 
+      {/* 表单 */}
       <form
         onSubmit={handleSubmit}
         className="bg-white rounded-lg border border-gray-200 p-6 space-y-5"
       >
+        {/* 名称 */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5">
             知识库名称 <span className="text-red-500">*</span>
@@ -92,6 +120,7 @@ export default function EditKnowledgeBasePage() {
           />
         </div>
 
+        {/* 描述 */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5">
             描述
@@ -105,12 +134,14 @@ export default function EditKnowledgeBasePage() {
           />
         </div>
 
+        {/* 错误提示 */}
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
             {error}
           </div>
         )}
 
+        {/* 操作按钮 */}
         <div className="flex items-center gap-3 pt-2">
           <button
             type="submit"

@@ -139,8 +139,7 @@ async def create_message(
 
     return StreamingResponse(
         response_stream(),
-        media_type="text/event-stream",  # SSE 协议类型
-        headers={"x-vercel-ai-data-stream": "v1"},  # Vercel AI SDK 标识
+        media_type="text/event-stream",
     )
 
 
