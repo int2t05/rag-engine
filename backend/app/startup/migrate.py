@@ -28,10 +28,10 @@ class DatabaseMigrator:
     @contextmanager
     def database_connection(self) -> Generator[Connection, None, None]:
         """
-        Context manager for database connections with timeout
+        数据库连接上下文管理器
 
-        Yields:
-            SQLAlchemy connection object
+        设置 3 秒连接超时，用于检查迁移状态。
+        使用 with 语句时自动管理连接的获取和释放。
         """
         engine = create_engine(
             self.db_url, connect_args={"connect_timeout": 3}  # 设置连接超时为3秒
@@ -45,13 +45,10 @@ class DatabaseMigrator:
 
     def check_migration_needed(self) -> Tuple[bool, str, str]:
         """
-        Check if database migration is needed
+        检查数据库是否需要执行迁移
 
         Returns:
-            Tuple containing:
-                - bool: Whether migration is needed
-                - str: Current revision
-                - str: Head revision
+            Tuple[bool, str, str]: (是否需要迁移, 当前版本, 目标版本)
         """
         with self.database_connection() as connection:
             context = MigrationContext.configure(connection)
@@ -67,34 +64,29 @@ class DatabaseMigrator:
 
     def _get_alembic_config(self) -> Config:
         """
-        Create and configure Alembic config
+        创建并配置 Alembic 配置对象
 
-        Returns:
-            Alembic config object
+        从 backend/alembic.ini 加载配置，并将数据库 URL 注入到配置中。
         """
-        project_root = Path(__file__).resolve().parents[2]  # Go up 3 levels from migrate.py
+        project_root = Path(__file__).resolve().parents[2]
         alembic_cfg = Config(project_root / "alembic.ini")
         alembic_cfg.set_main_option("sqlalchemy.url", self.db_url)
         return alembic_cfg
 
     def run_migrations(self) -> None:
         """
-        Run database migrations if needed
+        执行数据库迁移（如需要）
 
-        Raises:
-            Exception: If migration fails
+        先检查当前版本与目标版本是否一致，若不一致则执行 alembic upgrade head。
+        迁移失败时会抛出异常。
         """
         try:
-            # Check if migration is needed
             needs_migration, current_rev, head_rev = self.check_migration_needed()
 
             if needs_migration:
                 logger.info(f"Current revision: {current_rev}, upgrading to: {head_rev}")
                 self.alembic_cfg.set_main_option("sqlalchemy.url", self.db_url)
-
-                # 执行 alembic 升级
                 alembic_main(argv=["--raiseerr", "upgrade", "head"], config=self.alembic_cfg)
-
                 logger.info("Database migrations completed successfully")
             else:
                 logger.info(f"Database is already at the latest version: {current_rev}")

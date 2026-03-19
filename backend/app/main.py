@@ -9,15 +9,14 @@ RAG Web UI 后端应用入口
 
 import logging
 
-from app.api.api_v1.api import api_router
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.api_v1.api import api_router
 from app.api.openapi.api import router as openapi_router
 from app.core.config import settings
 from app.core.minio import init_minio
-
-from app.startup.migarate import DatabaseMigrator
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from app.startup.migrate import DatabaseMigrator
 
 # 配置日志格式，方便调试时查看时间、模块名、日志级别和消息
 logging.basicConfig(
@@ -45,7 +44,7 @@ app.add_middleware(
 )
 
 # 注册内部 API 路由（JWT 认证），前缀为 /api
-# 包含：/api/auth、/api/knowledge-base、/api/chat、/api/api-keys
+# 包含：/api/auth、/api/knowledge-base、/api/chat、/api/api-keys、/api/evaluation
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 # 注册 OpenAPI 路由（API Key 认证），前缀为 /openapi

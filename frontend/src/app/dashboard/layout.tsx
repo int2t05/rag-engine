@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { BookIcon, ChatIcon, HomeIcon, KeyIcon, LogoutIcon, MenuIcon, XIcon } from "@/components/icons";
+import { BookIcon, ChartBarIcon, ChatIcon, HomeIcon, KeyIcon, LogoutIcon, MenuIcon, XIcon } from "@/components/icons";
 
 interface NavItem {
   href: string;
@@ -14,6 +14,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "首页", icon: HomeIcon },
   { href: "/dashboard/knowledge-base", label: "知识库", icon: BookIcon },
   { href: "/dashboard/chat", label: "对话", icon: ChatIcon },
+  { href: "/dashboard/evaluation", label: "RAG 评估", icon: ChartBarIcon },
   { href: "/dashboard/api-keys", label: "API 密钥", icon: KeyIcon },
 ];
 
@@ -22,6 +23,8 @@ const BREADCRUMB_MAP: Record<string, string> = {
   "/dashboard/knowledge-base": "知识库",
   "/dashboard/knowledge-base/new": "新建知识库",
   "/dashboard/chat": "对话",
+  "/dashboard/evaluation": "RAG 评估",
+  "/dashboard/evaluation/new": "新建评估",
   "/dashboard/api-keys": "API 密钥",
 };
 
@@ -44,6 +47,8 @@ function getBreadcrumbs(pathname: string) {
     } else if (/^\d+$/.test(segments[i])) {
       if (segments[i - 1] === "knowledge-base") {
         crumbs.push({ label: "知识库详情", href });
+      } else if (segments[i - 1] === "evaluation") {
+        crumbs.push({ label: "评估详情", href });
       }
     }
   }

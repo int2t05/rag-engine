@@ -9,6 +9,7 @@ from .user import User
 from .knowledge import KnowledgeBase, Document, DocumentChunk
 from .chat import Chat, Message
 from .api_key import APIKey
+from .evaluation import EvaluationTask, EvaluationTestCase, EvaluationResult
 
 __all__ = [
     "User",
@@ -18,4 +19,7 @@ __all__ = [
     "Chat",
     "Message",
     "APIKey",
+    "EvaluationTask",
+    "EvaluationTestCase",
+    "EvaluationResult",
 ]

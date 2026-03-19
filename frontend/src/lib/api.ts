@@ -211,6 +211,48 @@ export interface Chat {
 }
 
 /**
+ * RAG 评估测试用例（创建用）
+ */
+export interface EvaluationTestCaseCreate {
+  query: string;
+  reference?: string | null;
+}
+
+/**
+ * RAG 评估任务
+ */
+export interface EvaluationTask {
+  id: number;
+  name: string;
+  description: string | null;
+  knowledge_base_id: number | null;
+  top_k: number;
+  evaluation_type: string;
+  status: string;
+  error_message: string | null;
+  summary: Record<string, unknown> | null;
+}
+
+/**
+ * RAG 评估结果（单个测试用例）
+ */
+export interface EvaluationResult {
+  id: number;
+  task_id: number;
+  test_case_id: number | null;
+  retrieved_contexts: unknown[] | null;
+  generated_answer: string | null;
+  context_relevance: number | null;
+  faithfulness: number | null;
+  answer_relevance: number | null;
+  context_recall: number | null;
+  context_precision: number | null;
+  ragas_score: number | null;
+  passed: number | null;
+  judge_details: Record<string, unknown> | null;
+}
+
+/**
  * API 密钥
  * @description 用于外部系统访问的密钥
  */
@@ -720,4 +762,74 @@ export const apiKeyApi = {
    */
   delete: (id: number) =>
     api.delete<ApiKey>(`/api/api-keys/${id}`),
+};
+
+// ==================== RAG 评估 API ====================
+
+/**
+ * 评估测试用例
+ */
+export interface EvaluationTestCaseCreate {
+  query: string;
+  reference?: string | null;
+}
+
+/**
+ * 评估任务
+ */
+export interface EvaluationTask {
+  id: number;
+  name: string;
+  description: string | null;
+  knowledge_base_id: number | null;
+  top_k: number;
+  evaluation_type: string;
+  status: string;
+  error_message: string | null;
+  summary: Record<string, unknown> | null;
+}
+
+/**
+ * 评估结果（单条）
+ */
+export interface EvaluationResult {
+  id: number;
+  task_id: number;
+  test_case_id: number | null;
+  retrieved_contexts: unknown[] | null;
+  generated_answer: string | null;
+  context_relevance: number | null;
+  faithfulness: number | null;
+  answer_relevance: number | null;
+  context_recall: number | null;
+  context_precision: number | null;
+  ragas_score: number | null;
+  passed: number | null;
+  judge_details: Record<string, unknown> | null;
+}
+
+/**
+ * RAG 评估相关 API
+ */
+export const evaluationApi = {
+  list: (skip = 0, limit = 100) =>
+    api.get<EvaluationTask[]>(`/api/evaluation?skip=${skip}&limit=${limit}`),
+
+  get: (id: number) =>
+    api.get<EvaluationTask>(`/api/evaluation/${id}`),
+
+  create: (data: {
+    name: string;
+    description?: string | null;
+    knowledge_base_id?: number | null;
+    top_k?: number;
+    evaluation_type?: string;
+    test_cases: EvaluationTestCaseCreate[];
+  }) => api.post<EvaluationTask>("/api/evaluation/", data),
+
+  run: (id: number) =>
+    api.post<{ message: string; task_id: number }>(`/api/evaluation/${id}/run`),
+
+  getResults: (id: number) =>
+    api.get<EvaluationResult[]>(`/api/evaluation/${id}/results`),
 };

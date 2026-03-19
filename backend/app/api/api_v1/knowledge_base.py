@@ -2,34 +2,36 @@
 知识库 API
 ==========
 知识库 CRUD、文档上传、分块预览、后台处理、处理状态查询、检索测试。
+
 文档处理流程：上传 → 预览(可选) → 处理 → 轮询状态
 """
 
+import asyncio
 import hashlib
-from typing import List, Any, Dict
+import logging
+import time
+from datetime import datetime, timedelta
+from io import BytesIO
+from typing import Any, Dict, List
+
 from fastapi import (
     APIRouter,
-    Depends,
-    HTTPException,
-    UploadFile,
-    File,
     BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
     Query,
+    UploadFile,
 )
-from sqlalchemy.orm import Session
-
-from langchain_chroma import Chroma
-from sqlalchemy import text
-import logging
-from datetime import datetime, timedelta
+from minio.error import MinioException
 from pydantic import BaseModel
-from sqlalchemy.orm import selectinload
-import time
-import asyncio
+from sqlalchemy.orm import Session, selectinload
 
-from app.db.session import get_db
-from app.models.user import User
+from app.core.config import settings
+from app.core.minio import get_minio_client
 from app.core.security import get_current_user
+from app.models.user import User
+from app.db.session import get_db
 from app.models.knowledge import (
     KnowledgeBase,
     Document,
@@ -51,12 +53,8 @@ from app.services.document_processor import (
     preview_document,
     PreviewResult,
 )
-from app.core.config import settings
-from app.core.minio import get_minio_client
-from minio.error import MinioException
-
-from app.services.vector_store import VectorStoreFactory
 from app.services.embedding.embedding_factory import EmbeddingsFactory
+from app.services.vector_store import VectorStoreFactory
 
 router = APIRouter()
 
@@ -158,7 +156,7 @@ def update_knowledge_base(
     if not kb:
         raise HTTPException(status_code=404, detail="未找到知识库")
 
-    for field, value in kb_in.dict(exclude_unset=True).items():
+    for field, value in kb_in.model_dump(exclude_unset=True).items():
         setattr(kb, field, value)
 
     db.add(kb)
@@ -292,18 +290,17 @@ async def upload_kb_documents(
             )
             continue
 
-        # 3. 上传到临时目录
+        # 3. 上传到临时目录（使用 BytesIO 避免 file 流位置问题）
         temp_path = f"kb_{kb_id}/temp/{file.filename}"
-        await file.seek(0)  # 将文件指针重新定位到文件开头
         try:
             minio_client = get_minio_client()
-            file_size = len(file_content)  # 使用之前读取的文件内容长度
+            file_size = len(file_content)
             minio_client.put_object(
                 bucket_name=settings.MINIO_BUCKET_NAME,
                 object_name=temp_path,
-                data=file.file,
-                length=file_size,  # 指定文件大小
-                content_type=file.content_type,
+                data=BytesIO(file_content),
+                length=file_size,
+                content_type=file.content_type or "application/octet-stream",
             )
         except MinioException as e:
             logger.error(f"上传文件到MinIO失败：{str(e)}")
@@ -398,6 +395,12 @@ async def process_kb_documents(
     # BackgroundTasks 是 FastAPI 内置的一个工具类，用于在请求响应返回后，异步执行一些耗时的后台任务
     """
     异步处理多个文档。
+
+    流程：
+    1. 校验知识库归属
+    2. 创建 ProcessingTask 记录
+    3. 将处理任务加入后台队列（add_processing_tasks_to_queue）
+    4. 立即返回 task_id 列表，前端可轮询 /documents/tasks 获取状态
     """
     start_time = time.time()
 
@@ -463,6 +466,8 @@ async def process_kb_documents(
 
     background_tasks.add_task(add_processing_tasks_to_queue, task_data, kb_id)
 
+    elapsed = round(time.time() - start_time, 2)
+    logger.info(f"已提交 {len(task_info)} 个文档处理任务，耗时 {elapsed}s")
     return {"tasks": task_info}
 
 

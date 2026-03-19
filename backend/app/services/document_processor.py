@@ -28,15 +28,11 @@ from langchain_community.document_loaders import (
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document as LangchainDocument
 from pydantic import BaseModel
-from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.minio import get_minio_client
 from app.models.knowledge import ProcessingTask, Document, DocumentChunk
 from app.services.chunk_record import ChunkRecord
-import uuid
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import UnstructuredFileLoader
 from minio.error import MinioException
 from minio import Minio
 from minio.commonconfig import CopySource
@@ -77,7 +73,13 @@ async def process_document(
     chunk_overlap: int = 200,
 ) -> None:
     """
-    处理文档并存储在矢量数据库中，并进行增量更新
+    处理文档并存储到向量数据库，支持增量更新。
+
+    流程：
+    1. 预览文档并分块
+    2. 计算每块哈希，与现有块对比
+    3. 仅插入新增/变更的块，删除已移除的块
+    4. 更新向量存储和 ChunkRecord
     """
     logger = logging.getLogger(__name__)
 
@@ -168,7 +170,12 @@ async def process_document(
 
 
 async def upload_document(file: UploadFile, kb_id: int) -> UploadResult:
-    """Step 1: 将文档上传到MinIO"""
+    """
+    将文档上传到 MinIO 对象存储。
+
+    文件路径格式：kb_{kb_id}/{清理后的文件名}
+    返回文件路径、大小、哈希等元数据，用于后续处理流程。
+    """
     content = await file.read()
     file_size = len(content)
 
@@ -214,7 +221,12 @@ async def upload_document(file: UploadFile, kb_id: int) -> UploadResult:
 async def preview_document(
     file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200
 ) -> PreviewResult:
-    """Step 2: 生成预览块"""
+    """
+    从 MinIO 下载文件，解析并分块，返回预览结果。
+
+    支持格式：PDF、DOCX、Markdown、TXT。
+    使用 RecursiveCharacterTextSplitter 进行递归分块。
+    """
     # 从MinIO获取文件
     minio_client = get_minio_client()
     _, ext = os.path.splitext(file_path)
@@ -271,7 +283,16 @@ async def process_document_background(
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
 ) -> None:
-    """在后台处理文档"""
+    """
+    后台文档处理主流程（新上传文件）。
+
+    流程：
+    1. 从 MinIO 临时目录下载文件
+    2. 解析文档并分块
+    3. 向量化并写入向量存储
+    4. 将文件移至永久目录，创建 Document 和 DocumentChunk 记录
+    5. 更新 ProcessingTask 和 DocumentUpload 状态
+    """
     logger = logging.getLogger(__name__)
     logger.info(f"正在启动任务{task_id}的后台处理, 文件名: {file_name}")
 
@@ -295,7 +316,10 @@ async def process_document_background(
         # 1. 从临时目录下载文件
         minio_client = get_minio_client()
         try:
-            local_temp_path = f"/tmp/temp_{task_id}_{file_name}"  # 使用系统临时目录
+            # 使用跨平台临时目录（Windows 下 /tmp 可能不存在）
+            local_temp_path = os.path.join(
+                tempfile.gettempdir(), f"temp_{task_id}_{file_name}"
+            )
             logger.info(
                 f"任务{task_id}：将文件从MinIO下载到{local_temp_path}：{temp_path}"
             )
@@ -461,8 +485,8 @@ async def process_document_background(
                 bucket_name=settings.MINIO_BUCKET_NAME, object_name=temp_path
             )
             logger.info(f"任务{task_id}：出错后清理临时文件")
-        except:
-            logger.warning(f"任务{task_id}：出错后无法清理临时文件")
+        except Exception as e:
+            logger.warning(f"任务{task_id}：出错后无法清理临时文件：{e}")
     finally:
         # 如果创建了db会话，则关闭
         if should_close_db and db:

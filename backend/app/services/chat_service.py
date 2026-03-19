@@ -14,10 +14,10 @@ RAG 对话服务（核心）
 """
 
 import json
+import logging
 import base64
 from typing import List, AsyncGenerator
 from sqlalchemy.orm import Session
-from langchain_openai import ChatOpenAI
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import (
@@ -26,17 +26,20 @@ from langchain_core.prompts import (
     PromptTemplate,
 )
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain.globals import set_verbose, set_debug
+
 from app.core.config import settings
 from app.models.chat import Message
 from app.models.knowledge import KnowledgeBase, Document
-from langchain.globals import set_verbose, set_debug
 from app.services.vector_store import VectorStoreFactory
 from app.services.embedding.embedding_factory import EmbeddingsFactory
 from app.services.llm.llm_factory import LLMFactory
 
-# 设置 LangChain 的 全局调试
-set_verbose(True)
-set_debug(True)
+logger = logging.getLogger(__name__)
+
+# LangChain 调试模式：仅当 DEBUG=True 时开启，避免生产环境日志过多
+set_verbose(settings.DEBUG)
+set_debug(settings.DEBUG)
 
 
 async def generate_response(
@@ -84,7 +87,7 @@ async def generate_response(
                     collection_name=f"kb_{kb.id}",
                     embedding_function=embeddings,
                 )
-                print(f"集合 {f'kb_{kb.id}'} 计数:", vector_store.count())
+                logger.debug("集合 %s 文档数: %d", f"kb_{kb.id}", vector_store.count())
                 vector_stores.append(vector_store)
 
         if not vector_stores:
@@ -202,7 +205,7 @@ async def generate_response(
 
     except Exception as e:
         error_message = f"错误生成响应：{str(e)}"
-        print(error_message)
+        logger.exception("RAG 响应生成失败")
         yield f"data: {json.dumps({'text': error_message})}\n"
 
         db.commit()

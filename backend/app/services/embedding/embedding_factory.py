@@ -1,8 +1,11 @@
 """
 Embedding 工厂
 =============
-根据配置创建 Embedding 实例（OpenAI / DashScope / Ollama）。
-Embedding 将文本转换为固定长度的向量，用于向量检索。
+根据 EMBEDDINGS_PROVIDER 配置创建文本嵌入模型实例。
+
+Embedding 将文本转换为固定长度的向量表示，用于：
+- 文档分块向量化后写入向量数据库
+- 用户查询向量化后与知识库进行相似度检索
 """
 
 from app.core.config import settings
@@ -12,10 +15,24 @@ from langchain_community.embeddings import DashScopeEmbeddings, ZhipuAIEmbedding
 
 
 class EmbeddingsFactory:
+    """文本嵌入模型工厂，按配置创建对应 provider 的 Embedding 实例"""
+
     @staticmethod
     def create():
         """
-        基于.env config创建嵌入实例的工厂方法。
+        创建 Embedding 实例
+
+        根据 settings.EMBEDDINGS_PROVIDER 选择：
+        - openai: OpenAI / 兼容接口
+        - dashscope: 阿里云通义
+        - ollama: 本地 Ollama
+        - zhipu: 智谱 GLM
+
+        Returns:
+            Embeddings: LangChain 兼容的嵌入模型实例
+
+        Raises:
+            ValueError: 当 provider 不支持时
         """
         # Suppose your .env has a value like EMBEDDINGS_PROVIDER=openai
         embeddings_provider = settings.EMBEDDINGS_PROVIDER.lower()

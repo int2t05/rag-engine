@@ -19,12 +19,15 @@ logger = logging.getLogger(__name__)
 
 def get_minio_client() -> Minio:
     """
-    创建并返回一个 MinIO 客户端实例
+    创建并返回一个 MinIO 客户端实例。
 
-    每次调用都会创建新的客户端实例（MinIO 客户端是轻量级的）
-    secure=False 表示使用 HTTP 而非 HTTPS，开发环境通常这样配置
+    每次调用都会创建新的客户端实例（MinIO 客户端是轻量级的）。
+    secure=False 表示使用 HTTP 而非 HTTPS，开发环境通常这样配置。
+
+    Returns:
+        Minio: 配置好的 MinIO 客户端
     """
-    logger.info("创建MinIO客户端实例")
+    logger.debug("创建 MinIO 客户端实例")
     return Minio(
         settings.MINIO_ENDPOINT,  # MinIO 服务地址，如 "minio:9000"
         access_key=settings.MINIO_ACCESS_KEY,  # 访问密钥（类似用户名）

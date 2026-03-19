@@ -2,12 +2,12 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { knowledgeBaseApi, chatApi, apiKeyApi, ApiError } from "@/lib/api";
-import { BookIcon, ChatIcon, KeyIcon, PlusIcon } from "@/components/icons";
+import { knowledgeBaseApi, chatApi, apiKeyApi, evaluationApi, ApiError } from "@/lib/api";
+import { BookIcon, ChatIcon, ChartBarIcon, KeyIcon, PlusIcon } from "@/components/icons";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [stats, setStats] = useState<{ kb: number; chat: number; keys: number } | null>(null);
+  const [stats, setStats] = useState<{ kb: number; chat: number; keys: number; eval: number } | null>(null);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -18,15 +18,17 @@ export default function DashboardPage() {
 
     (async () => {
       try {
-        const [kbList, chatList, keyList] = await Promise.all([
+        const [kbList, chatList, keyList, evalList] = await Promise.all([
           knowledgeBaseApi.list(),
           chatApi.list(),
           apiKeyApi.list(),
+          evaluationApi.list(),
         ]);
         setStats({
           kb: Array.isArray(kbList) ? kbList.length : 0,
           chat: Array.isArray(chatList) ? chatList.length : 0,
           keys: Array.isArray(keyList) ? keyList.length : 0,
+          eval: Array.isArray(evalList) ? evalList.length : 0,
         });
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -67,6 +69,16 @@ export default function DashboardPage() {
       count: stats?.keys,
       action: "管理密钥",
     },
+    {
+      href: "/dashboard/evaluation",
+      icon: ChartBarIcon,
+      iconBg: "bg-violet-50 group-hover:bg-violet-100",
+      iconColor: "text-violet-600",
+      title: "RAG 评估",
+      desc: "评估检索与生成效果",
+      count: stats?.eval,
+      action: "查看评估",
+    },
   ];
 
   return (
@@ -74,7 +86,7 @@ export default function DashboardPage() {
       <h1 className="text-2xl font-bold text-gray-800 mb-1">欢迎回来</h1>
       <p className="text-gray-500 text-sm mb-8">快速访问常用功能</p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {cards.map((card) => (
           <Link
             key={card.href}
@@ -118,6 +130,13 @@ export default function DashboardPage() {
           >
             <ChatIcon className="w-4 h-4" />
             新建对话
+          </Link>
+          <Link
+            href="/dashboard/evaluation/new"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+          >
+            <ChartBarIcon className="w-4 h-4" />
+            新建评估
           </Link>
         </div>
       </div>

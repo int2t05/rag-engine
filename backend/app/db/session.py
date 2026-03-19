@@ -14,8 +14,11 @@ SQLAlchemy 的工作方式：
 - yield 之后的代码在请求结束时执行（关闭会话，释放连接）
 """
 
+from typing import Generator
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
+
 from app.core.config import settings
 
 # 创建数据库引擎
@@ -28,7 +31,7 @@ engine = create_engine(settings.get_database_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def get_db():
+def get_db() -> Generator[Session, None, None]:
     """
     数据库会话依赖注入函数
 
