@@ -5,11 +5,13 @@
 
 "use client";
 import { useEffect, useState, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { knowledgeBaseApi, DocumentItem, ApiError } from "@/lib/api";
 import { formatFileSize } from "@/lib/utils";
-import { ArrowLeftIcon, FileIcon } from "@/components/icons";
+import { ArrowLeftIcon, FileIcon, TrashIcon } from "@/components/icons";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Toast } from "@/components/Toast";
 
 /** 状态映射表 */
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
@@ -78,6 +80,7 @@ function DetailRow({
 
 export default function DocumentDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const kbId = params.id as string;
   const docId = params.docId as string;
 
@@ -86,6 +89,20 @@ export default function DocumentDetailPage() {
   const [doc, setDoc] = useState<DocumentItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [toast, setToast] = useState({
+    msg: "",
+    type: "success" as "success" | "error" | "info",
+    show: false,
+  });
+
+  const showToastMsg = useCallback(
+    (msg: string, type: "success" | "error" | "info" = "error") => {
+      setToast({ msg, type, show: true });
+    },
+    [],
+  );
 
   // ==================== 数据获取 ====================
 
@@ -104,6 +121,18 @@ export default function DocumentDetailPage() {
   useEffect(() => {
     fetchDocument();
   }, [fetchDocument]);
+
+  const handleDelete = useCallback(async () => {
+    setDeleting(true);
+    try {
+      await knowledgeBaseApi.deleteDocument(Number(kbId), Number(docId));
+      showToastMsg("文档已删除", "success");
+      setTimeout(() => router.replace(`/dashboard/knowledge-base/${kbId}`), 400);
+    } catch (err) {
+      showToastMsg(err instanceof ApiError ? err.message : "删除失败", "error");
+      setDeleting(false);
+    }
+  }, [kbId, docId, router, showToastMsg]);
 
   // ==================== 渲染 ====================
 
@@ -159,12 +188,27 @@ export default function DocumentDetailPage() {
               文档 ID: {doc.id}
             </p>
           </div>
-          {lastTask && <StatusBadge status={lastTask.status} />}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {lastTask && <StatusBadge status={lastTask.status} />}
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={deleting}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 border border-red-200 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <TrashIcon className="w-4 h-4" />
+              {deleting ? "删除中..." : "删除"}
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 border-t border-gray-100 pt-5">
           <InfoItem label="文件大小" value={formatFileSize(doc.file_size)} />
           <InfoItem label="文件类型" value={doc.content_type} />
+          <InfoItem
+            label="分块个数"
+            value={doc.chunk_count != null ? String(doc.chunk_count) : "-"}
+          />
           <InfoItem
             label="创建时间"
             value={new Date(doc.created_at).toLocaleString("zh-CN")}
@@ -246,6 +290,24 @@ export default function DocumentDetailPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="删除文档"
+        description={`确定要删除文档「${doc.file_name}」吗？此操作不可恢复，向量索引和文件将被清除。`}
+        confirmText="删除"
+        variant="danger"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
+
+      <Toast
+        message={toast.msg}
+        type={toast.type}
+        visible={toast.show}
+        onClose={() => setToast((p) => ({ ...p, show: false }))}
+      />
     </div>
   );
 }

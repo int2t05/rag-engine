@@ -10,7 +10,7 @@ import asyncio
 import hashlib
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from io import BytesIO
 from typing import Any, Dict, List
 
@@ -25,6 +25,7 @@ from fastapi import (
 )
 from minio.error import MinioException
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
@@ -489,17 +490,49 @@ async def cleanup_temp_files(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """
-    清理过期的临时文件。
+    清除临时文件。
+    清除文档上传记录（DocumentUpload）及关联的任务处理记录（ProcessingTask），
+    以及未指定文档的孤立任务（仅 status 字段）；并删除 MinIO 中的临时文件。
+    任务正在运行（pending/processing）的不删除。
     """
-    from app.models.base import BEIJING_TZ
-
-    expired_time = datetime.now(BEIJING_TZ) - timedelta(hours=24)
-    expired_uploads = (
-        db.query(DocumentUpload).filter(DocumentUpload.created_at < expired_time).all()
+    # 排除有正在运行任务的上传记录
+    running_upload_ids = (
+        db.query(ProcessingTask.document_upload_id)
+        .filter(
+            ProcessingTask.document_upload_id.isnot(None),
+            ProcessingTask.status.in_(["pending", "processing"]),
+        )
+        .distinct()
     )
+    uploads_to_delete = (
+        db.query(DocumentUpload)
+        .filter(~DocumentUpload.id.in_(running_upload_ids))
+        .all()
+    )
+    upload_ids_to_delete = [u.id for u in uploads_to_delete]
+    deleted_tasks = 0
+
+    # 清除关联的任务处理记录（需在删除 DocumentUpload 之前执行，因外键约束）
+    if upload_ids_to_delete:
+        deleted_tasks = (
+            db.query(ProcessingTask)
+            .filter(ProcessingTask.document_upload_id.in_(upload_ids_to_delete))
+            .delete(synchronize_session=False)
+        )
+
+    # 清除未指定文档的孤立任务（document_upload_id 和 document_id 均为空，且非运行中）
+    orphan_tasks_deleted = (
+        db.query(ProcessingTask)
+        .filter(
+            ProcessingTask.document_upload_id.is_(None),
+            ProcessingTask.document_id.is_(None),
+        )
+        .delete(synchronize_session=False)
+    )
+    deleted_tasks += orphan_tasks_deleted
 
     minio_client = get_minio_client()
-    for upload in expired_uploads:
+    for upload in uploads_to_delete:
         try:
             minio_client.remove_object(
                 bucket_name=settings.MINIO_BUCKET_NAME, object_name=upload.temp_path
@@ -511,7 +544,10 @@ async def cleanup_temp_files(
 
     db.commit()
 
-    return {"message": f"已清理{len(expired_uploads)}条过期上传"}
+    msg = f"已清理{len(uploads_to_delete)}条上传记录、{deleted_tasks}条任务处理记录"
+    if orphan_tasks_deleted:
+        msg += f"（含{orphan_tasks_deleted}条孤立任务）"
+    return {"message": msg}
 
 
 @router.get("/{kb_id}/documents/tasks")
@@ -587,7 +623,99 @@ async def get_document(
     if not document:
         raise HTTPException(status_code=404, detail="文件未找到")
 
-    return document
+    # 统计分块个数
+    chunk_count = (
+        db.query(func.count(DocumentChunk.id))
+        .filter(DocumentChunk.document_id == doc_id)
+        .scalar()
+        or 0
+    )
+
+    return DocumentResponse(
+        id=document.id,
+        file_name=document.file_name,
+        file_path=document.file_path,
+        file_hash=document.file_hash,
+        file_size=document.file_size,
+        content_type=document.content_type,
+        knowledge_base_id=document.knowledge_base_id,
+        created_at=document.created_at,
+        updated_at=document.updated_at,
+        processing_tasks=document.processing_tasks,
+        chunk_count=chunk_count,
+    )
+
+
+@router.delete("/{kb_id}/documents/{doc_id}")
+async def delete_document(
+    *,
+    db: Session = Depends(get_db),
+    kb_id: int,
+    doc_id: int,
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    删除文档：移除向量索引、MinIO 文件及数据库记录。
+    """
+    document = (
+        db.query(Document)
+        .join(KnowledgeBase)
+        .filter(
+            Document.id == doc_id,
+            Document.knowledge_base_id == kb_id,
+            KnowledgeBase.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not document:
+        raise HTTPException(status_code=404, detail="文件未找到")
+
+    try:
+        # 1. 获取该文档的所有分块 ID（用于从向量库删除）
+        chunk_ids = [
+            row[0]
+            for row in db.query(DocumentChunk.id)
+            .filter(DocumentChunk.document_id == doc_id)
+            .all()
+        ]
+
+        # 2. 从向量存储删除分块
+        if chunk_ids:
+            embeddings = EmbeddingsFactory.create()
+            vector_store = VectorStoreFactory.create(
+                store_type=settings.VECTOR_STORE_TYPE,
+                collection_name=f"kb_{kb_id}",
+                embedding_function=embeddings,
+            )
+            try:
+                vector_store.delete(chunk_ids)
+                logger.info(f"已从向量库删除文档 {doc_id} 的 {len(chunk_ids)} 个分块")
+            except Exception as e:
+                logger.warning(f"向量库删除分块失败（继续删除其他资源）: {e}")
+
+        # 3. 从 MinIO 删除文件
+        minio_client = get_minio_client()
+        try:
+            minio_client.remove_object(settings.MINIO_BUCKET_NAME, document.file_path)
+            logger.info(f"已从 MinIO 删除文件: {document.file_path}")
+        except MinioException as e:
+            logger.warning(f"MinIO 删除文件失败（继续删除数据库记录）: {e}")
+
+        # 4. 删除关联的 ProcessingTask（document_id 指向此文档的）
+        db.query(ProcessingTask).filter(
+            ProcessingTask.document_id == doc_id,
+        ).delete(synchronize_session=False)
+
+        # 5. 删除 Document（级联删除 DocumentChunk）
+        db.delete(document)
+        db.commit()
+
+        return {"message": "文档已删除", "doc_id": doc_id}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"删除文档 {doc_id} 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"删除文档失败: {str(e)}")
 
 
 @router.post("/test-retrieval")

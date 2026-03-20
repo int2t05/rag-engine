@@ -106,6 +106,7 @@ class DocumentResponse(DocumentBase):
     created_at: datetime
     updated_at: datetime
     processing_tasks: List[ProcessingTask] = []
+    chunk_count: Optional[int] = None  # 分块个数
 
     class Config:
         from_attributes = True

@@ -26,7 +26,7 @@ from app.services.chat_service import generate_response
 router = APIRouter()
 
 
-@router.post("/", response_model=ChatResponse)
+@router.post("", response_model=ChatResponse)
 def create_chat(
     *,
     db: Session = Depends(get_db),
@@ -60,7 +60,7 @@ def create_chat(
     return chat
 
 
-@router.get("/", response_model=List[ChatResponse])
+@router.get("", response_model=List[ChatResponse])
 def get_chats(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

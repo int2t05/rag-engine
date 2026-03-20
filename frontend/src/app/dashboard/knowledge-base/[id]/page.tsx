@@ -26,6 +26,7 @@ import {
   TrashIcon,
 } from "@/components/icons";
 import { Toast } from "@/components/Toast";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { formatFileSize } from "@/lib/utils";
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
@@ -73,6 +74,8 @@ export default function KnowledgeBaseDetailPage() {
   const [expandedChunks, setExpandedChunks] = useState<Set<string>>(new Set());
 
   const [cleaning, setCleaning] = useState(false);
+  const [deletingDoc, setDeletingDoc] = useState<number | null>(null);
+  const [confirmDeleteDoc, setConfirmDeleteDoc] = useState<DocumentItem | null>(null);
 
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState(5);
@@ -83,6 +86,26 @@ export default function KnowledgeBaseDetailPage() {
   const showToast = useCallback((msg: string, type: "success" | "error" | "info" = "error") => {
     setToast({ msg, type, show: true });
   }, []);
+
+  const handleDeleteDocument = useCallback(async () => {
+    if (!confirmDeleteDoc || !kb) return;
+    const doc = confirmDeleteDoc;
+    setDeletingDoc(doc.id);
+    try {
+      await knowledgeBaseApi.deleteDocument(kb.id, doc.id);
+      setKb((prev) =>
+        prev
+          ? { ...prev, documents: prev.documents.filter((d) => d.id !== doc.id) }
+          : null,
+      );
+      showToast("文档已删除", "success");
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "删除失败", "error");
+    } finally {
+      setDeletingDoc(null);
+      setConfirmDeleteDoc(null);
+    }
+  }, [confirmDeleteDoc, kb, showToast]);
 
   const fetchKb = useCallback(async () => {
     try {
@@ -577,12 +600,14 @@ export default function KnowledgeBaseDetailPage() {
               const lastTask =
                 doc.processing_tasks[doc.processing_tasks.length - 1];
               return (
-                <Link
+                <div
                   key={doc.id}
-                  href={`/dashboard/knowledge-base/${kb.id}/documents/${doc.id}`}
-                  className="py-3 flex items-center justify-between gap-4 hover:bg-gray-50 -mx-2 px-2 rounded-lg transition-colors"
+                  className="py-3 flex items-center justify-between gap-4 hover:bg-gray-50 -mx-2 px-2 rounded-lg transition-colors group"
                 >
-                  <div className="flex items-center gap-3 min-w-0">
+                  <Link
+                    href={`/dashboard/knowledge-base/${kb.id}/documents/${doc.id}`}
+                    className="flex-1 flex items-center gap-3 min-w-0"
+                  >
                     <FileIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-800 truncate">
@@ -593,15 +618,32 @@ export default function KnowledgeBaseDetailPage() {
                         {new Date(doc.created_at).toLocaleString("zh-CN")}
                       </p>
                     </div>
-                  </div>
+                  </Link>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {lastTask && <StatusBadge status={lastTask.status} />}
                     <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded hidden sm:inline-block">
                       {doc.content_type}
                     </span>
-                    <ChevronRightIcon className="w-4 h-4 text-gray-300" />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setConfirmDeleteDoc(doc);
+                      }}
+                      disabled={deletingDoc === doc.id}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                      title="删除文档"
+                    >
+                      <TrashIcon className="w-4 h-4" />
+                    </button>
+                    <Link
+                      href={`/dashboard/knowledge-base/${kb.id}/documents/${doc.id}`}
+                      className="p-1 text-gray-300 hover:text-gray-500"
+                    >
+                      <ChevronRightIcon className="w-4 h-4" />
+                    </Link>
                   </div>
-                </Link>
+                </div>
               );
             })}
           </div>
@@ -688,6 +730,17 @@ export default function KnowledgeBaseDetailPage() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmDeleteDoc}
+        title="删除文档"
+        description={`确定要删除文档「${confirmDeleteDoc?.file_name}」吗？此操作不可恢复，向量索引和文件将被清除。`}
+        confirmText="删除"
+        variant="danger"
+        loading={deletingDoc !== null}
+        onConfirm={handleDeleteDocument}
+        onCancel={() => setConfirmDeleteDoc(null)}
+      />
 
       <Toast
         message={toast.msg}

@@ -53,9 +53,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field(
         default="change-me", alias="SECRET_KEY"
     )  # JWT 签名密钥，生产环境必须修改为随机长字符串
-    ALGORITHM: str = Field(
-        default="HS256", alias="ALGORITHM"
-    )  # JWT 算法，不建议更改
+    ALGORITHM: str = Field(default="HS256", alias="ALGORITHM")  # JWT 算法，不建议更改
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
         default=10080, alias="ACCESS_TOKEN_EXPIRE_MINUTES"
     )  # Token 有效期（10080 分钟 = 7 天），可根据业务调整

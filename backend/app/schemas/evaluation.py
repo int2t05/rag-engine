@@ -17,6 +17,17 @@ class TestCaseCreate(BaseModel):
     reference: Optional[str] = None
 
 
+class TestCaseResponse(BaseModel):
+    """评估测试用例响应"""
+
+    id: int
+    query: str
+    reference: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class EvaluationTaskCreate(BaseModel):
     """评估任务创建请求"""
 
@@ -43,6 +54,7 @@ class EvaluationTaskResponse(BaseModel):
     status: str
     error_message: Optional[str]
     summary: Optional[dict]
+    test_cases: Optional[List["TestCaseResponse"]] = None
 
     class Config:
         from_attributes = True

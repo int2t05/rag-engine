@@ -9,7 +9,7 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.security import get_current_user
 from app.db.session import get_db
@@ -42,7 +42,7 @@ def get_evaluation_types(
     return get_evaluation_types_config()
 
 
-@router.post("/", response_model=EvaluationTaskResponse)
+@router.post("", response_model=EvaluationTaskResponse)
 def create_evaluation_task(
     *,
     db: Session = Depends(get_db),
@@ -91,7 +91,7 @@ def create_evaluation_task(
     return task
 
 
-@router.get("/", response_model=List[EvaluationTaskResponse])
+@router.get("", response_model=List[EvaluationTaskResponse])
 def list_evaluation_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -116,7 +116,28 @@ def get_evaluation_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    """获取单个评估任务详情"""
+    """获取单个评估任务详情（含测试用例）"""
+    task = (
+        db.query(EvaluationTask)
+        .options(joinedload(EvaluationTask.test_cases))
+        .filter(
+            EvaluationTask.id == task_id,
+            EvaluationTask.created_by == current_user.id,
+        )
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="评估任务不存在")
+    return task
+
+
+@router.delete("/{task_id}")
+def delete_evaluation_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """删除评估任务（级联删除测试用例与结果）"""
     task = (
         db.query(EvaluationTask)
         .filter(
@@ -127,7 +148,12 @@ def get_evaluation_task(
     )
     if not task:
         raise HTTPException(status_code=404, detail="评估任务不存在")
-    return task
+    if task.status == "running":
+        raise HTTPException(status_code=400, detail="任务正在执行中，无法删除")
+
+    db.delete(task)
+    db.commit()
+    return {"message": "删除成功", "task_id": task_id}
 
 
 @router.post("/{task_id}/run")

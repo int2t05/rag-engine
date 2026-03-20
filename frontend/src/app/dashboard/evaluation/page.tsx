@@ -8,6 +8,8 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { evaluationApi, EvaluationTask, ApiError } from "@/lib/api";
 import { PlusIcon, ChartBarIcon } from "@/components/icons";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Toast } from "@/components/Toast";
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "待执行",
@@ -27,6 +29,20 @@ export default function EvaluationPage() {
   const [list, setList] = useState<EvaluationTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<EvaluationTask | null>(null);
+  const [toast, setToast] = useState({
+    msg: "",
+    type: "success" as "success" | "error" | "info",
+    show: false,
+  });
+
+  const showToast = useCallback(
+    (msg: string, type: "success" | "error" | "info" = "error") => {
+      setToast({ msg, type, show: true });
+    },
+    [],
+  );
 
   const fetchList = useCallback(async () => {
     try {
@@ -43,6 +59,22 @@ export default function EvaluationPage() {
   useEffect(() => {
     fetchList();
   }, [fetchList]);
+
+  const doDelete = useCallback(async () => {
+    if (!confirmDelete) return;
+    const t = confirmDelete;
+    setDeleting(t.id);
+    try {
+      await evaluationApi.delete(t.id);
+      setList((prev) => prev.filter((item) => item.id !== t.id));
+      showToast("评估任务已删除", "success");
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "删除失败", "error");
+    } finally {
+      setDeleting(null);
+      setConfirmDelete(null);
+    }
+  }, [confirmDelete, showToast]);
 
   if (loading) {
     return (
@@ -131,11 +163,36 @@ export default function EvaluationPage() {
                 >
                   详情
                 </Link>
+                <button
+                  onClick={() => setConfirmDelete(task)}
+                  disabled={deleting === task.id || task.status === "running"}
+                  className="flex-1 text-center py-1.5 text-sm text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {deleting === task.id ? "删除中..." : "删除"}
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="删除评估任务"
+        description={`确定要删除评估任务「${confirmDelete?.name}」吗？此操作不可恢复，测试用例和评估结果将一并删除。`}
+        confirmText="删除"
+        variant="danger"
+        loading={deleting !== null}
+        onConfirm={doDelete}
+        onCancel={() => setConfirmDelete(null)}
+      />
+
+      <Toast
+        message={toast.msg}
+        type={toast.type}
+        visible={toast.show}
+        onClose={() => setToast((p) => ({ ...p, show: false }))}
+      />
     </div>
   );
 }

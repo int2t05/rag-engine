@@ -35,9 +35,11 @@ from app.services.evaluation.evaluation_config import (
     EVALUATION_TYPE_NEEDS_GENERATION,
     EVALUATION_TYPE_NEEDS_RETRIEVAL,
 )
+import logging
 
 # RAGAS 相关
 _RAGAS_AVAILABLE = False
+_RAGAS_IMPORT_ERROR: Optional[str] = None  # 导入失败时的错误信息
 try:
     from ragas import evaluate
     from ragas.metrics import (
@@ -50,8 +52,8 @@ try:
     from ragas.llms import LangchainLLMWrapper
 
     _RAGAS_AVAILABLE = True
-except ImportError:
-    pass
+except ImportError as e:
+    _RAGAS_IMPORT_ERROR = str(e)
 
 # 通过阈值（文档定义）
 PASS_THRESHOLD = 0.6
@@ -110,7 +112,14 @@ def _evaluate_with_ragas(
     metrics_to_use: 可选，指定要评估的指标。None 表示全量评估。
     RAGAS 需要 answer 列，retrieval 类型传空字符串时，生成类指标将为 None。
     """
+    # logger = logging.getLogger(__name__)
+    # logger.info(f"_RAGAS_AVAILABLE:{_RAGAS_AVAILABLE}")
+
     if not _RAGAS_AVAILABLE:
+        logging.warning(
+            "RAGAS 未安装或导入失败，无法进行评分。请执行: pip install ragas datasets。"
+            f"导入错误: {_RAGAS_IMPORT_ERROR or '未知'}"
+        )
         return {
             "context_relevance": None,
             "faithfulness": None,
@@ -118,6 +127,7 @@ def _evaluate_with_ragas(
             "context_precision": None,
             "context_recall": None,
             "ragas_score": None,
+            "error": f"RAGAS 未安装: {_RAGAS_IMPORT_ERROR or '请 pip install ragas datasets'}",
         }
 
     if not metrics_to_use:
@@ -143,7 +153,10 @@ def _evaluate_with_ragas(
 
         # 按需选择 RAGAS 指标（context_precision 依赖 answer，无答案时仅评估 context_recall）
         ragas_metrics = []
-        if any(m in metrics_to_use for m in ("context_precision", "context_relevance")) and answer:
+        if (
+            any(m in metrics_to_use for m in ("context_precision", "context_relevance"))
+            and answer
+        ):
             ragas_metrics.append(context_precision)
         if "context_recall" in metrics_to_use:
             ragas_metrics.append(context_recall)
@@ -205,6 +218,7 @@ def _evaluate_with_ragas(
             "ragas_score": ragas_score,
         }
     except Exception as e:
+        logging.exception("RAGAS 评估执行异常: %s", e)
         return {
             "context_relevance": None,
             "faithfulness": None,
@@ -315,6 +329,11 @@ def run_evaluation_task(task_id: int) -> None:
         embeddings = None
         if _RAGAS_AVAILABLE:
             embeddings = EmbeddingsFactory.create()
+        else:
+            logging.warning(
+                "RAGAS 未安装，评估将执行检索和生成，但无法计算评分。"
+                "请执行: pip install ragas datasets"
+            )
 
         top_k = task.top_k or 5
         eval_type = (task.evaluation_type or "full").lower()
@@ -383,13 +402,22 @@ def run_evaluation_task(task_id: int) -> None:
                 answer_relevance=_mask_score("answer_relevance"),
                 context_recall=_mask_score("context_recall"),
                 context_precision=_mask_score("context_precision"),
-                ragas_score=scores.get("ragas_score")
-                if ("context_relevance" in metrics_for_type or "context_precision" in metrics_for_type)
-                and "faithfulness" in metrics_for_type
-                and "answer_relevance" in metrics_for_type
-                else None,
+                ragas_score=(
+                    scores.get("ragas_score")
+                    if (
+                        "context_relevance" in metrics_for_type
+                        or "context_precision" in metrics_for_type
+                    )
+                    and "faithfulness" in metrics_for_type
+                    and "answer_relevance" in metrics_for_type
+                    else None
+                ),
                 passed=passed,
-                judge_details={k: v for k, v in scores.items() if k in metrics_for_type or k in ("ragas_score", "error")},
+                judge_details={
+                    k: v
+                    for k, v in scores.items()
+                    if k in metrics_for_type or k in ("ragas_score", "error")
+                },
             )
             db.add(result)
             db.commit()
@@ -412,19 +440,41 @@ def run_evaluation_task(task_id: int) -> None:
             "duration_seconds": round(duration, 2),
             "evaluation_type": eval_type,
         }
+        if not _RAGAS_AVAILABLE:
+            base_summary["warning"] = "RAGAS 未安装，无法计算评分。请执行: pip install ragas datasets"
         if eval_type == "retrieval":
-            base_summary["avg_context_relevance"] = round(avg_cr, 4) if avg_cr is not None else None
-            base_summary["avg_context_precision"] = round(avg_cp, 4) if avg_cp is not None else None
-            base_summary["avg_context_recall"] = round(avg_cr_val, 4) if avg_cr_val is not None else None
+            base_summary["avg_context_relevance"] = (
+                round(avg_cr, 4) if avg_cr is not None else None
+            )
+            base_summary["avg_context_precision"] = (
+                round(avg_cp, 4) if avg_cp is not None else None
+            )
+            base_summary["avg_context_recall"] = (
+                round(avg_cr_val, 4) if avg_cr_val is not None else None
+            )
         elif eval_type == "generation":
-            base_summary["avg_faithfulness"] = round(avg_f, 4) if avg_f is not None else None
-            base_summary["avg_answer_relevance"] = round(avg_ar, 4) if avg_ar is not None else None
+            base_summary["avg_faithfulness"] = (
+                round(avg_f, 4) if avg_f is not None else None
+            )
+            base_summary["avg_answer_relevance"] = (
+                round(avg_ar, 4) if avg_ar is not None else None
+            )
         else:
-            base_summary["avg_context_relevance"] = round(avg_cr, 4) if avg_cr is not None else None
-            base_summary["avg_faithfulness"] = round(avg_f, 4) if avg_f is not None else None
-            base_summary["avg_answer_relevance"] = round(avg_ar, 4) if avg_ar is not None else None
-            base_summary["avg_context_precision"] = round(avg_cp, 4) if avg_cp is not None else None
-            base_summary["avg_context_recall"] = round(avg_cr_val, 4) if avg_cr_val is not None else None
+            base_summary["avg_context_relevance"] = (
+                round(avg_cr, 4) if avg_cr is not None else None
+            )
+            base_summary["avg_faithfulness"] = (
+                round(avg_f, 4) if avg_f is not None else None
+            )
+            base_summary["avg_answer_relevance"] = (
+                round(avg_ar, 4) if avg_ar is not None else None
+            )
+            base_summary["avg_context_precision"] = (
+                round(avg_cp, 4) if avg_cp is not None else None
+            )
+            base_summary["avg_context_recall"] = (
+                round(avg_cr_val, 4) if avg_cr_val is not None else None
+            )
 
         task.summary = base_summary  # type: ignore
         task.status = "completed"  # type: ignore

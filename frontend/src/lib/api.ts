@@ -59,6 +59,8 @@ export interface DocumentItem {
   updated_at: string;
   /** 关联的处理任务列表 */
   processing_tasks: ProcessingTask[];
+  /** 分块个数 */
+  chunk_count?: number | null;
 }
 
 /**
@@ -569,6 +571,17 @@ export const knowledgeBaseApi = {
     api.get<DocumentItem>(`/api/knowledge-base/${kbId}/documents/${docId}`),
 
   /**
+   * 删除文档
+   * @param kbId - 知识库 ID
+   * @param docId - 文档 ID
+   * @returns 删除结果
+   */
+  deleteDocument: (kbId: number, docId: number) =>
+    api.delete<{ message: string; doc_id: number }>(
+      `/api/knowledge-base/${kbId}/documents/${docId}`,
+    ),
+
+  /**
    * 清理临时文件
    * @description 清理超过 24 小时的过期临时上传文件
    * @returns 清理结果消息
@@ -767,11 +780,20 @@ export const apiKeyApi = {
 // ==================== RAG 评估 API ====================
 
 /**
- * 评估测试用例
+ * 评估测试用例（创建用）
  */
 export interface EvaluationTestCaseCreate {
   query: string;
   reference?: string | null;
+}
+
+/**
+ * 评估测试用例（响应）
+ */
+export interface EvaluationTestCase {
+  id: number;
+  query: string;
+  reference: string | null;
 }
 
 /**
@@ -787,6 +809,7 @@ export interface EvaluationTask {
   status: string;
   error_message: string | null;
   summary: Record<string, unknown> | null;
+  test_cases?: EvaluationTestCase[] | null;
 }
 
 /**
@@ -832,4 +855,7 @@ export const evaluationApi = {
 
   getResults: (id: number) =>
     api.get<EvaluationResult[]>(`/api/evaluation/${id}/results`),
+
+  delete: (id: number) =>
+    api.delete<{ message: string; task_id: number }>(`/api/evaluation/${id}`),
 };

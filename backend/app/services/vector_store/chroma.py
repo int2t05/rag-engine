@@ -4,6 +4,7 @@ ChromaDB 向量存储实现
 通过 HTTP 客户端连接 ChromaDB 服务。
 """
 
+import logging
 from typing import List, Any
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -12,6 +13,8 @@ import chromadb
 from app.core.config import settings
 
 from .base import BaseVectorStore
+
+logger = logging.getLogger(__name__)
 
 
 class ChromaVectorStore(BaseVectorStore):
@@ -31,8 +34,21 @@ class ChromaVectorStore(BaseVectorStore):
         )
 
     def add_documents(self, documents: List[Document]) -> None:
-        """添加文档到 Chroma"""
-        self._store.add_documents(documents)
+        """
+        添加文档到 Chroma
+        
+        Args:
+            documents: Document 对象列表
+            
+        Note:
+            由于智谱 AI Embedding API 限制每次最多 64 条，这里采用分批处理策略
+        """
+        # 分批处理，每批最多 64 条 (智谱 AI 的限制)
+        batch_size = 64
+        for i in range(0, len(documents), batch_size):
+            batch = documents[i:i + batch_size]
+            logger.debug(f"添加批次 {i // batch_size + 1}: {len(batch)} 个文档")
+            self._store.add_documents(batch)
 
     def delete(self, ids: List[str]) -> None:
         """从 Chroma中删除文档"""

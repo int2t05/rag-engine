@@ -4,6 +4,7 @@ Qdrant 向量存储实现
 作为 ChromaDB 的替代选项。
 """
 
+import logging
 from typing import List, Any, Tuple
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -13,6 +14,8 @@ from qdrant_client.http.exceptions import UnexpectedResponse  # 异常处理
 from app.core.config import settings
 
 from .base import BaseVectorStore
+
+logger = logging.getLogger(__name__)
 
 
 class QdrantStore(BaseVectorStore):
@@ -32,8 +35,21 @@ class QdrantStore(BaseVectorStore):
         )
 
     def add_documents(self, documents: List[Document]) -> None:
-        """Add documents to Qdrant"""
-        self._store.add_documents(documents)
+        """
+        添加文档到 Qdrant
+        
+        Args:
+            documents: Document 对象列表
+            
+        Note:
+            由于智谱 AI Embedding API 限制每次最多 64 条，这里采用分批处理策略
+        """
+        # 分批处理，每批最多 64 条 (智谱 AI 的限制)
+        batch_size = 64
+        for i in range(0, len(documents), batch_size):
+            batch = documents[i:i + batch_size]
+            logger.debug(f"添加批次 {i // batch_size + 1}: {len(batch)} 个文档")
+            self._store.add_documents(batch)
 
     def delete(self, ids: List[str]) -> None:
         """Delete documents from Qdrant"""
