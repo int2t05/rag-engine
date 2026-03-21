@@ -8,7 +8,7 @@ import { PATH } from "@/lib/routes";
 const highlights = [
   { t: "知识库", d: "多格式文档分块与向量化" },
   { t: "对话", d: "流式回答与引用溯源" },
-  { t: "API", d: "密钥管理与系统集成" },
+  { t: "RAG 评估", d: "检索与生成质量评测" },
 ];
 
 export default function Home() {
@@ -58,7 +58,7 @@ export default function Home() {
           面向文档团队的简洁问答工作台
         </h1>
         <p className="mt-5 max-w-md text-sm leading-relaxed text-muted">
-          上传资料、自动索引、用自然语言提问。控制台内完成知识库、对话、评估与 API 密钥管理。
+          上传资料、自动索引、用自然语言提问。控制台内完成知识库、对话、评估与模型配置。
         </p>
         <div className="mt-10 flex flex-wrap gap-3">
           <Link

@@ -1,0 +1,225 @@
+/**
+ * @fileoverview 按后端路由前缀划分的 API 方法
+ * @description
+ * - /api/auth → authApi
+ * - /api/knowledge-base → knowledgeBaseApi
+ * - /api/chat → chatApi
+ * - /api/llm-configs → llmConfigApi
+ * - /api/evaluation → evaluationApi
+ */
+
+import { API_BASE, api } from "./client";
+import type {
+  AiRuntimeSettings,
+  Chat,
+  ChatMessage,
+  DocumentItem,
+  EvaluationResolveResponse,
+  EvaluationResult,
+  EvaluationTask,
+  EvaluationTestCaseCreate,
+  EvaluationTypeInfo,
+  KnowledgeBase,
+  LlmEmbeddingConfigItem,
+  LlmEmbeddingConfigListResponse,
+  PreviewResult,
+  RetrievalResult,
+  TaskStatus,
+  UploadResult,
+} from "./types";
+
+/**
+ * 知识库与文档、检索测试（前缀 /api/knowledge-base）
+ */
+export const knowledgeBaseApi = {
+  list: (skip = 0, limit = 100) =>
+    api.get<KnowledgeBase[]>(`/api/knowledge-base?skip=${skip}&limit=${limit}`),
+
+  get: (id: number) => api.get<KnowledgeBase>(`/api/knowledge-base/${id}`),
+
+  create: (data: { name: string; description?: string | null }) =>
+    api.post<KnowledgeBase>("/api/knowledge-base", data),
+
+  update: (id: number, data: { name: string; description?: string | null }) =>
+    api.put<KnowledgeBase>(`/api/knowledge-base/${id}`, data),
+
+  delete: (id: number) =>
+    api.delete<{ message: string; warnings?: string[] }>(`/api/knowledge-base/${id}`),
+
+  /** POST .../documents/upload，body 为 FormData（字段名 files） */
+  uploadDocuments: (kbId: number, files: FormData) =>
+    api.post<UploadResult[]>(`/api/knowledge-base/${kbId}/documents/upload`, files),
+
+  previewDocuments: (
+    kbId: number,
+    data: { document_ids: number[]; chunk_size?: number; chunk_overlap?: number },
+  ) =>
+    api.post<Record<number, PreviewResult>>(`/api/knowledge-base/${kbId}/documents/preview`, data),
+
+  processDocuments: (kbId: number, uploadResults: UploadResult[]) =>
+    api.post<{ tasks: { upload_id: number; task_id: number }[] }>(
+      `/api/knowledge-base/${kbId}/documents/process`,
+      uploadResults,
+    ),
+
+  getProcessingTasks: (kbId: number, taskIds: number[]) =>
+    api.get<Record<string, TaskStatus>>(
+      `/api/knowledge-base/${kbId}/documents/tasks?task_ids=${taskIds.join(",")}`,
+    ),
+
+  getDocument: (kbId: number, docId: number) =>
+    api.get<DocumentItem>(`/api/knowledge-base/${kbId}/documents/${docId}`),
+
+  deleteDocument: (kbId: number, docId: number) =>
+    api.delete<{ message: string; doc_id: number }>(
+      `/api/knowledge-base/${kbId}/documents/${docId}`,
+    ),
+
+  batchDeleteDocuments: (kbId: number, documentIds: number[]) =>
+    api.post<{
+      deleted: number[];
+      failed: { doc_id: number; detail: string }[];
+    }>(`/api/knowledge-base/${kbId}/documents/batch-delete`, {
+      document_ids: documentIds,
+    }),
+
+  cleanup: () => api.post<{ message: string }>("/api/knowledge-base/cleanup"),
+
+  /** POST /api/knowledge-base/test-retrieval，body: query, kb_id, top_k */
+  testRetrieval: (data: { query: string; kb_id: number; top_k: number }) =>
+    api.post<{ results: RetrievalResult[] }>("/api/knowledge-base/test-retrieval", data),
+};
+
+/**
+ * 认证（前缀 /api/auth）
+ */
+export const authApi = {
+  /** OAuth2 密码模式 application/x-www-form-urlencoded */
+  login: (username: string, password: string) => {
+    const params = new URLSearchParams();
+    params.append("username", username);
+    params.append("password", password);
+    return api.post<{ access_token: string; token_type: string }>(
+      "/api/auth/token",
+      params,
+    );
+  },
+
+  register: (data: { username: string; email: string; password: string }) =>
+    api.post<{ id: number; username: string; email: string }>(
+      "/api/auth/register",
+      data,
+    ),
+
+  /** POST /api/auth/test-token，需 Bearer */
+  testToken: () =>
+    api.post<{ id: number; username: string; email: string }>(
+      "/api/auth/test-token",
+    ),
+};
+
+/**
+ * 对话与流式消息（前缀 /api/chat）
+ */
+export const chatApi = {
+  list: (skip = 0, limit = 100) =>
+    api.get<Chat[]>(`/api/chat?skip=${skip}&limit=${limit}`),
+
+  /** 含完整 messages 历史 */
+  get: (id: number) => api.get<Chat>(`/api/chat/${id}`),
+
+  create: (data: { title: string; knowledge_base_ids: number[] }) =>
+    api.post<Chat>("/api/chat", data),
+
+  delete: (id: number) => api.delete<{ status: string }>(`/api/chat/${id}`),
+
+  batchDelete: (chatIds: number[]) =>
+    api.post<{ deleted: number[]; not_found: number[] }>("/api/chat/batch-delete", {
+      chat_ids: chatIds,
+    }),
+
+  /**
+   * POST /api/chat/{chatId}/messages，SSE 流；不受 fetchApi 默认超时限制
+   * @param messages 完整历史，末条须为 user（与 StreamMessagesRequest 一致）
+   */
+  sendMessage: (chatId: number, messages: ChatMessage[], signal?: AbortSignal) => {
+    const token =
+      typeof window !== "undefined" ? localStorage.getItem("token") : "";
+    return fetch(`${API_BASE}/api/chat/${chatId}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify({ messages }),
+      signal,
+    });
+  },
+};
+
+/**
+ * LLM / 嵌入多配置（前缀 /api/llm-configs）
+ */
+export const llmConfigApi = {
+  list: () => api.get<LlmEmbeddingConfigListResponse>("/api/llm-configs"),
+
+  create: (data: { name: string; config: AiRuntimeSettings }) =>
+    api.post<LlmEmbeddingConfigItem>("/api/llm-configs", data),
+
+  update: (id: number, data: { name?: string; config?: AiRuntimeSettings }) =>
+    api.put<LlmEmbeddingConfigItem>(`/api/llm-configs/${id}`, data),
+
+  activate: (id: number) =>
+    api.post<LlmEmbeddingConfigItem>(`/api/llm-configs/${id}/activate`),
+
+  delete: (id: number) => api.delete<void>(`/api/llm-configs/${id}`),
+};
+
+/**
+ * RAG 评估任务（前缀 /api/evaluation）
+ */
+export const evaluationApi = {
+  listTypes: () => api.get<EvaluationTypeInfo[]>("/api/evaluation/types"),
+
+  list: (skip = 0, limit = 100) =>
+    api.get<EvaluationTask[]>(`/api/evaluation?skip=${skip}&limit=${limit}`),
+
+  resolve: (id: number) =>
+    api.get<EvaluationResolveResponse>(`/api/evaluation/resolve/${id}`),
+
+  get: (id: number) => api.get<EvaluationTask>(`/api/evaluation/${id}`),
+
+  create: (data: {
+    name: string;
+    description?: string | null;
+    knowledge_base_id?: number | null;
+    top_k?: number;
+    evaluation_type?: string;
+    evaluation_metrics?: string[];
+    test_cases: EvaluationTestCaseCreate[];
+  }) => api.post<EvaluationTask>("/api/evaluation", data),
+
+  run: (id: number, options?: { force?: boolean }) => {
+    const q = options?.force === true ? "?force=true" : "";
+    return api.post<{ message: string; task_id: number }>(`/api/evaluation/${id}/run${q}`);
+  },
+
+  getResults: (id: number) =>
+    api.get<EvaluationResult[]>(`/api/evaluation/${id}/results`),
+
+  delete: (id: number, options?: { force?: boolean }) => {
+    const q = options?.force === true ? "?force=true" : "";
+    return api.delete<{ message: string; task_id: number }>(
+      `/api/evaluation/${id}${q}`,
+    );
+  },
+
+  importTestCases: (
+    id: number,
+    data: { test_cases: EvaluationTestCaseCreate[] },
+  ) =>
+    api.post<{ task_id: number; imported: number; skipped: number }>(
+      `/api/evaluation/${id}/test-cases/import`,
+      data,
+    ),
+};

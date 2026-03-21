@@ -22,7 +22,7 @@ LangChain 1.x 重构说明：
 import json
 import logging
 import base64
-from typing import List, AsyncGenerator, Any
+from typing import List, AsyncGenerator, Any, Awaitable, Callable, Optional
 from sqlalchemy.orm import Session
 from langchain_core.prompts import (
     ChatPromptTemplate,
@@ -39,6 +39,9 @@ from app.shared.llm.llm_factory import LLMFactory
 from app.shared.rag_dedupe import dedupe_retrieved_documents
 
 logger = logging.getLogger(__name__)
+
+_CANCELLED_SUFFIX = "\n\n（已停止生成）"
+_STOPPED_ONLY = "（已停止生成）"
 
 
 def _format_docs(docs: List[Any]) -> str:
@@ -83,7 +86,12 @@ def _stream_chunk_to_text(chunk: Any) -> str:
 
 
 async def generate_response(
-    query: str, messages: dict, knowledge_base_ids: List[int], chat_id: int, db: Session
+    query: str,
+    messages: dict,
+    knowledge_base_ids: List[int],
+    chat_id: int,
+    db: Session,
+    client_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
 ) -> AsyncGenerator[str, None]:
     """
     生成 RAG 流式回答
@@ -96,7 +104,21 @@ async def generate_response(
         db: 数据库会话
 
     yield: 符合 Vercel AI SDK 协议的 SSE 文本块 流式传输
+
+    client_disconnected:
+        可选协程，返回 True 表示客户端已断开（刷新、关闭页、前端 Abort）。
+        用于停止生成并落库占位/已生成片段，避免长时间占用资源。
     """
+    async def _client_gone() -> bool:
+        if client_disconnected is None:
+            return False
+        try:
+            return await client_disconnected()
+        except Exception:
+            return False
+
+    stream_finished_ok = False
+
     try:
         # 1. 持久化用户消息和占位 AI 消息
         user_message = Message(content=query, role="user", chat_id=chat_id)
@@ -135,6 +157,7 @@ async def generate_response(
             yield "data: [DONE]\n"
             bot_message.content = error_msg  # type: ignore
             db.commit()
+            stream_finished_ok = True
             return
 
         # 3. 使用第一个知识库的检索器（可扩展为多库合并）
@@ -201,9 +224,21 @@ async def generate_response(
                 chat_history.append(AIMessage(content=message["content"]))
 
         # 8. 历史感知：仅用重写后的问句做检索；回答仍针对用户本轮原话 question=query
+        if await _client_gone():
+            bot_message.content = _STOPPED_ONLY  # type: ignore
+            db.commit()
+            yield "data: [DONE]\n"
+            return
+
         standalone_q = await history_aware_rewrite.ainvoke(
             {"input": query, "chat_history": chat_history}
         )
+        if await _client_gone():
+            bot_message.content = _STOPPED_ONLY  # type: ignore
+            db.commit()
+            yield "data: [DONE]\n"
+            return
+
         retrieved_docs = await retriever.ainvoke(standalone_q)
         retrieved_docs = dedupe_retrieved_documents(retrieved_docs)
         logger.info(
@@ -218,6 +253,12 @@ async def generate_response(
             _serialize_context(retrieved_docs).encode()
         ).decode()
         separator = "__LLM_RESPONSE__"
+        if await _client_gone():
+            bot_message.content = _STOPPED_ONLY  # type: ignore
+            db.commit()
+            yield "data: [DONE]\n"
+            return
+
         yield f"data: {json.dumps({'text': base64_context + separator}, ensure_ascii=False)}\n"
         full_response += base64_context + separator
 
@@ -229,15 +270,32 @@ async def generate_response(
                 "chat_history": chat_history,
             }
         ):
+            if await _client_gone():
+                if full_response.strip():
+                    bot_message.content = full_response + _CANCELLED_SUFFIX  # type: ignore
+                else:
+                    bot_message.content = _STOPPED_ONLY  # type: ignore
+                db.commit()
+                yield "data: [DONE]\n"
+                return
             piece = _stream_chunk_to_text(chunk)
             if not piece:
                 continue
             full_response += piece
-            yield f"data: {json.dumps({'text': piece}, ensure_ascii=False)}\n"
+            try:
+                yield f"data: {json.dumps({'text': piece}, ensure_ascii=False)}\n"
+            except (GeneratorExit, ConnectionError, BrokenPipeError, OSError):
+                if full_response.strip():
+                    bot_message.content = full_response + _CANCELLED_SUFFIX  # type: ignore
+                else:
+                    bot_message.content = _STOPPED_ONLY  # type: ignore
+                db.commit()
+                raise
 
         # 10. 更新数据库中的 AI 消息
         bot_message.content = full_response  # type: ignore
         db.commit()
+        stream_finished_ok = True
 
     except Exception as e:
         error_message = f"错误生成响应：{str(e)}"
@@ -249,4 +307,16 @@ async def generate_response(
             bot_message.content = error_message  # type: ignore
             db.commit()
     finally:
+        if (
+            not stream_finished_ok
+            and "bot_message" in locals()
+            and bot_message is not None
+        ):
+            content = getattr(bot_message, "content", None)
+            if content is None or (isinstance(content, str) and not content.strip()):
+                try:
+                    bot_message.content = _STOPPED_ONLY  # type: ignore
+                    db.commit()
+                except Exception:
+                    logger.exception("写入中断占位消息失败")
         db.close()

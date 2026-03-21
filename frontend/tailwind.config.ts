@@ -25,6 +25,15 @@ const config: Config = {
         sans: ["var(--font-body)", "system-ui", "sans-serif"],
         display: ["var(--font-display)", "Georgia", "serif"],
       },
+      keyframes: {
+        "reveal-up": {
+          from: { opacity: "0", transform: "translateY(6px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        "reveal-up": "reveal-up 0.35s ease-out both",
+      },
     },
   },
   plugins: [],

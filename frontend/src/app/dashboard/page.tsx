@@ -3,14 +3,20 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { knowledgeBaseApi, chatApi, apiKeyApi, evaluationApi, ApiError } from "@/lib/api";
+import { knowledgeBaseApi, chatApi, evaluationApi, ApiError } from "@/lib/api";
 import { PATH } from "@/lib/routes";
-import { BookIcon, ChatIcon, ChartBarIcon, KeyIcon, PlusIcon } from "@/components/icons";
+import { BookIcon, ChatIcon, ChartBarIcon, PlusIcon } from "@/components/icons";
+import { DashboardSkillCard } from "@/components/dashboard/DashboardSkillCard";
+
+/** 与列表类 GET 接口对齐：后端返回 JSON 数组时取 length */
+function countListItems(data: unknown): number {
+  if (Array.isArray(data)) return data.length;
+  return 0;
+}
 
 const modules = [
   { href: PATH.knowledgeBase, icon: BookIcon, title: "知识库", desc: "文档与索引", key: "kb" as const },
   { href: PATH.chat, icon: ChatIcon, title: "对话", desc: "RAG 问答", key: "chat" as const },
-  { href: PATH.apiKeys, icon: KeyIcon, title: "API 密钥", desc: "对外集成", key: "keys" as const },
   { href: PATH.evaluation, icon: ChartBarIcon, title: "RAG 评估", desc: "检索与生成", key: "eval" as const },
 ];
 
@@ -22,7 +28,7 @@ const quickLinks = [
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [stats, setStats] = useState<{ kb: number; chat: number; keys: number; eval: number } | null>(null);
+  const [stats, setStats] = useState<{ kb: number; chat: number; eval: number } | null>(null);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -33,17 +39,15 @@ export default function DashboardPage() {
 
     (async () => {
       try {
-        const [kbList, chatList, keyList, evalList] = await Promise.all([
+        const [kbList, chatList, evalList] = await Promise.all([
           knowledgeBaseApi.list(),
           chatApi.list(),
-          apiKeyApi.list(),
           evaluationApi.list(),
         ]);
         setStats({
-          kb: Array.isArray(kbList) ? kbList.length : 0,
-          chat: Array.isArray(chatList) ? chatList.length : 0,
-          keys: Array.isArray(keyList) ? keyList.length : 0,
-          eval: Array.isArray(evalList) ? evalList.length : 0,
+          kb: countListItems(kbList),
+          chat: countListItems(chatList),
+          eval: countListItems(evalList),
         });
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -53,30 +57,24 @@ export default function DashboardPage() {
     })();
   }, [router]);
 
-  const countFor = (key: (typeof modules)[number]["key"]) => {
-    if (!stats) return null;
-    return stats[key];
-  };
+  const loading = stats === null;
 
   return (
     <div className="mx-auto max-w-4xl">
       <h1 className="font-display text-2xl font-semibold text-ink">工作台</h1>
       <p className="mt-1 text-sm text-muted">常用入口与数量一览</p>
 
-      <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {modules.map((m) => (
-          <Link
+          <DashboardSkillCard
             key={m.href}
             href={m.href}
-            className="group rounded-xl border border-border bg-surface p-5 transition-all hover:border-accent/30 hover:shadow-sm"
-          >
-            <m.icon className="h-5 w-5 text-accent" />
-            <h2 className="mt-3 font-medium text-ink">{m.title}</h2>
-            <p className="mt-0.5 text-xs text-muted">{m.desc}</p>
-            <p className="mt-4 font-display text-2xl font-semibold tabular-nums text-ink">
-              {countFor(m.key) ?? <span className="inline-block h-7 w-8 animate-pulse rounded bg-surface-muted" />}
-            </p>
-          </Link>
+            title={m.title}
+            desc={m.desc}
+            icon={m.icon}
+            loading={loading}
+            count={stats ? stats[m.key] : null}
+          />
         ))}
       </div>
 

@@ -7,16 +7,23 @@ RAG 评估执行服务（对应《RAG评估业务流程最佳实践》第二节 
 import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage
 from sqlalchemy.orm import Session
 
+from datetime import datetime
+
 from app.db.session import SessionLocal
+from app.models.base import BEIJING_TZ
 from app.models.evaluation import EvaluationResult, EvaluationTask, EvaluationTestCase
 from app.models.knowledge import Document, KnowledgeBase
 from app.modules.evaluation.evaluation_config import (
     AVG_SUMMARY_KEYS,
+    EVAL_GENERATE_TIMEOUT_SEC,
+    EVAL_RAGAS_SAMPLE_TOTAL_TIMEOUT_SEC,
+    EVAL_RETRIEVE_TIMEOUT_SEC,
     EVALUATION_TYPE_NEEDS_GENERATION,
     EVALUATION_TYPE_NEEDS_RETRIEVAL,
     SCORE_KEYS,
@@ -43,15 +50,38 @@ except ImportError as e:
 PASS_THRESHOLD = 0.6
 
 
+def _empty_score_row() -> dict:
+    return {k: None for k in SCORE_KEYS} | {"ragas_score": None}
+
+
+def _call_sync_with_timeout(fn: Any, timeout_sec: float, label: str) -> Any:
+    """同步阻塞调用（向量库 / LangChain invoke）放入线程并限时，避免永久挂死 worker。"""
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(fn)
+        try:
+            return fut.result(timeout=timeout_sec)
+        except FuturesTimeout:
+            logging.warning("%s 超过 %s 秒未完成，已中止等待", label, timeout_sec)
+            raise TimeoutError(f"{label} 超时（{int(timeout_sec)} 秒）") from None
+
+
 def _retrieve(
     query: str,
     vector_store: Any,
     top_k: int,
 ) -> List[str]:
     """检索阶段：对 query 进行向量检索，返回 top_k 个文档片段文本。"""
-    docs = vector_store.similarity_search(query, k=top_k)
-    docs = dedupe_retrieved_documents(docs)
-    return [d.page_content for d in docs]
+
+    def _inner() -> List[str]:
+        docs = vector_store.similarity_search(query, k=top_k)
+        docs = dedupe_retrieved_documents(docs)
+        return [d.page_content for d in docs]
+
+    return _call_sync_with_timeout(
+        _inner,
+        float(EVAL_RETRIEVE_TIMEOUT_SEC),
+        "向量检索",
+    )
 
 
 def _generate_answer(query: str, contexts: List[str], llm: Any) -> str:
@@ -72,15 +102,19 @@ def _generate_answer(query: str, contexts: List[str], llm: Any) -> str:
 
 用户问题：{query}
 
-请给出简洁、准确的答案："""
+    请给出简洁、准确的答案："""
 
-    # LangChain 模型需传入 Message 列表
-    response = llm.invoke(
-        [HumanMessage(content=prompt)]
-    )  # invoke 方法异步调用大语言模型
-    if hasattr(response, "content"):
-        return response.content
-    return str(response)
+    def _inner() -> str:
+        response = llm.invoke([HumanMessage(content=prompt)])
+        if hasattr(response, "content"):
+            return response.content
+        return str(response)
+
+    return _call_sync_with_timeout(
+        _inner,
+        float(EVAL_GENERATE_TIMEOUT_SEC),
+        "答案生成",
+    )
 
 
 def _evaluate_with_ragas(
@@ -94,13 +128,12 @@ def _evaluate_with_ragas(
     from app.modules.evaluation.ragas_eval import (
         build_metric_instances,
         build_ragas_dependencies,
-        empty_score_row,
         evaluate_metrics_sample,
         metrics_need_embeddings,
     )
 
     if not metrics_to_use:
-        return empty_score_row()
+        return _empty_score_row()
 
     if not _RAGAS_AVAILABLE:
         logging.warning(
@@ -108,7 +141,7 @@ def _evaluate_with_ragas(
             f"导入错误: {_RAGAS_IMPORT_ERROR or '未知'}"
         )
         return {
-            **empty_score_row(),
+            **_empty_score_row(),
             "error": f"RAGAS 未安装: {_RAGAS_IMPORT_ERROR or '请 pip install ragas datasets'}",
         }
 
@@ -116,19 +149,32 @@ def _evaluate_with_ragas(
         need_emb = metrics_need_embeddings(metrics_to_use)
         llm, emb = build_ragas_dependencies(need_emb)
         inst = build_metric_instances(llm, emb, metrics_to_use)
-        return await evaluate_metrics_sample(
-            inst,
-            user_input=question,
-            response=answer or "",
-            retrieved_contexts=contexts,
-            reference=ground_truth or "",
+        return await asyncio.wait_for(
+            evaluate_metrics_sample(
+                inst,
+                user_input=question,
+                response=answer or "",
+                retrieved_contexts=contexts,
+                reference=ground_truth or "",
+            ),
+            timeout=float(EVAL_RAGAS_SAMPLE_TOTAL_TIMEOUT_SEC),
         )
 
     try:
         return asyncio.run(_run())
+    except TimeoutError as e:
+        logging.warning(
+            "RAGAS 单条样本总耗时超过 %s 秒: %s",
+            EVAL_RAGAS_SAMPLE_TOTAL_TIMEOUT_SEC,
+            e,
+        )
+        return {
+            **_empty_score_row(),
+            "error": f"RAGAS 评分总超时（{EVAL_RAGAS_SAMPLE_TOTAL_TIMEOUT_SEC} 秒）",
+        }
     except Exception as e:
         logging.exception("RAGAS 评估执行异常: %s", e)
-        return {**empty_score_row(), "error": str(e)}
+        return {**_empty_score_row(), "error": str(e)}
 
 
 def _is_passed(scores: dict, metrics_used: List[str]) -> int:
@@ -271,26 +317,37 @@ def _run_evaluation_body(
 
     # 3. 对每个测试用例：检索 → 生成（按需）→ 评估 → 保存
     for tc in test_cases:
-        # 3a. 检索
+        # 心跳：刷新任务行的 updated_at，便于检测僵死的「执行中」状态
+        task.updated_at = datetime.now(BEIJING_TZ)  # type: ignore[assignment]
+        db.add(task)
+        db.commit()
+
         retrieved_contexts: List[str] = []
-        if vector_store and needs_retrieval:
-            retrieved_contexts = _retrieve(tc.query, vector_store, top_k)
+        generated_answer: Optional[str] = "" if not needs_generation else None
+        try:
+            # 3a. 检索
+            if vector_store and needs_retrieval:
+                retrieved_contexts = _retrieve(tc.query, vector_store, top_k)
 
-        # 3b. 生成（retrieval 类型跳过）
-        generated_answer: Optional[str] = None
-        if needs_generation:
-            generated_answer = _generate_answer(tc.query, retrieved_contexts, llm)
-        else:
-            generated_answer = ""
+            # 3b. 生成（retrieval 类型跳过）
+            if needs_generation:
+                generated_answer = _generate_answer(tc.query, retrieved_contexts, llm)
+            else:
+                generated_answer = ""
 
-        # 3c. 评估（按类型只计算对应指标）
-        scores = _evaluate_with_ragas(
-            question=tc.query,
-            contexts=retrieved_contexts,
-            answer=generated_answer or "",
-            ground_truth=tc.reference or "",
-            metrics_to_use=metrics_for_type,
-        )
+            # 3c. 评估（按类型只计算对应指标）
+            scores = _evaluate_with_ragas(
+                question=tc.query,
+                contexts=retrieved_contexts,
+                answer=generated_answer or "",
+                ground_truth=tc.reference or "",
+                metrics_to_use=metrics_for_type,
+            )
+        except TimeoutError as e:
+            logging.warning("评估用例 id=%s 超时: %s", tc.id, e)
+            scores = {**_empty_score_row(), "error": str(e)}
+            if generated_answer is None:
+                generated_answer = ""
 
         passed = _is_passed(scores, metrics_for_type)
         total_passed += passed

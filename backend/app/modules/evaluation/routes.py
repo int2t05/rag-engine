@@ -136,13 +136,17 @@ def delete_evaluation_task(
 def run_evaluation(
     task_id: int,
     background_tasks: BackgroundTasks,
+    force: bool = Query(
+        False,
+        description="为 true 时：若任务卡在「执行中」则强制重置并重新排队（服务重启后常用）",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
 ) -> Any:
     """后台触发 RAGAS 评估流水线。"""
     try:
-        return schedule_run(db, current_user.id, task_id, background_tasks)
+        return schedule_run(db, current_user.id, task_id, background_tasks, force=force)
     except ResourceNotFoundError as e:
         raise HTTPException(status_code=404, detail=e.detail) from e
     except BadRequestError as e:

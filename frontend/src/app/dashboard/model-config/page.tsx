@@ -36,7 +36,11 @@ export default function ModelConfigPage() {
   const [formName, setFormName] = useState("");
   const [formConfig, setFormConfig] = useState<AiRuntimeSettings>(defaultConfig);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState({ msg: "", type: "success" as const, visible: false });
+  const [toast, setToast] = useState({
+    msg: "",
+    type: "success" as "success" | "error" | "info",
+    visible: false,
+  });
   const [confirmDel, setConfirmDel] = useState<LlmEmbeddingConfigItem | null>(null);
 
   const showToast = useCallback((msg: string, type: "success" | "error" = "success") => {
@@ -81,7 +85,7 @@ export default function ModelConfigPage() {
       if (editing === "new") {
         await llmConfigApi.create({ name: formName.trim(), config: formConfig });
         showToast("已创建并设为当前启用");
-      } else if (editing && editing !== "new") {
+      } else if (editing) {
         const updated = await llmConfigApi.update(editing.id, {
           name: formName.trim(),
           config: formConfig,

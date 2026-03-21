@@ -9,6 +9,7 @@ from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from starlette.requests import Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -103,6 +104,7 @@ def get_chat_endpoint(
 @router.post("/{chat_id}/messages")
 async def create_message_endpoint(
     *,
+    request: Request,
     db: Session = Depends(get_db),
     chat_id: int,
     body: StreamMessagesRequest,
@@ -122,6 +124,9 @@ async def create_message_endpoint(
     except BadRequestError as e:
         raise HTTPException(status_code=400, detail=e.detail) from e
 
+    async def disconnect_check() -> bool:
+        return await request.is_disconnected()
+
     async def response_stream():
         tok = set_ai_runtime_token(rt)
         try:
@@ -131,6 +136,7 @@ async def create_message_endpoint(
                 knowledge_base_ids=knowledge_base_ids,
                 chat_id=chat_id,
                 db=db,
+                client_disconnected=disconnect_check,
             ):
                 yield chunk
         finally:

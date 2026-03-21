@@ -46,6 +46,18 @@ SCORE_KEYS: Tuple[str, ...] = (
     "answer_correctness",
 )
 
+# ---------- 评估流水线超时（秒）：防止检索 / LLM / RAGAS 无限挂死 ----------
+# 向量检索（同步 similarity_search）
+EVAL_RETRIEVE_TIMEOUT_SEC: int = 120
+# 单条用例答案生成（同步 llm.invoke）
+EVAL_GENERATE_TIMEOUT_SEC: int = 180
+# RAGAS 单次 metric.ascore（内部多轮 LLM）
+EVAL_RAGAS_ASCORE_CALL_TIMEOUT_SEC: int = 120
+# 单条用例 RAGAS 全部指标合计（含重试）
+EVAL_RAGAS_SAMPLE_TOTAL_TIMEOUT_SEC: int = 600
+# OpenAI 兼容 HTTP 客户端（RAGAS 所用 AsyncOpenAI）
+EVAL_HTTP_TIMEOUT_SEC: int = 120
+
 # summary 中 avg_* 字段名
 AVG_SUMMARY_KEYS: dict[str, str] = {
     "context_relevance": "avg_context_relevance",

@@ -6,12 +6,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import List
 
 from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestError, ResourceNotFoundError
+from app.models.base import BEIJING_TZ
 from app.models.evaluation import EvaluationTask, EvaluationTestCase
 from app.modules.evaluation.repository import EvaluationRepository
 from app.schemas.evaluation import (
@@ -22,6 +24,21 @@ from app.schemas.evaluation import (
     TestCaseBatchImportResult,
 )
 from app.modules.evaluation import run_evaluation_task
+
+# 超过该时间未更新任务行则认为「执行中」已僵死（依赖评估循环内的心跳更新 updated_at）
+_STALE_RUNNING_MINUTES = 90
+
+
+def _is_stale_running(task: EvaluationTask, minutes: int = _STALE_RUNNING_MINUTES) -> bool:
+    if task.status != "running":
+        return False
+    u = task.updated_at
+    if u is None:
+        return True
+    now = datetime.now(BEIJING_TZ)
+    if u.tzinfo is None:
+        u = u.replace(tzinfo=BEIJING_TZ)
+    return now - u > timedelta(minutes=minutes)
 
 
 def create_task(
@@ -144,13 +161,31 @@ def schedule_run(
     user_id: int,
     task_id: int,
     background_tasks: BackgroundTasks,
+    force: bool = False,
 ) -> dict:
     repo = EvaluationRepository(db)
     task = repo.get_task_for_user(task_id, user_id, with_test_cases=False)
     if not task:
         raise ResourceNotFoundError("评估任务不存在")
+
     if task.status == "running":
-        raise BadRequestError("任务正在执行中")
+        if force:
+            task.status = "pending"  # type: ignore
+            task.error_message = None  # type: ignore
+            db.commit()
+            db.refresh(task)
+        elif _is_stale_running(task):
+            task.status = "failed"  # type: ignore
+            task.error_message = (  # type: ignore
+                "上次执行可能因进程退出或超时中断，状态已自动结束，可再次执行"
+            )
+            db.commit()
+            db.refresh(task)
+        else:
+            raise BadRequestError(
+                "任务正在执行中。若服务已重启或长时间无进度，可使用查询参数 force=true 强制重新执行"
+            )
+
     background_tasks.add_task(run_evaluation_task, task_id)
     return {"message": "评估已开始执行", "task_id": task_id}
 

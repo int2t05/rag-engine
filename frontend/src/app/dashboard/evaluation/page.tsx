@@ -12,20 +12,7 @@ import { PATH } from "@/lib/routes";
 import { PlusIcon, ChartBarIcon } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Toast } from "@/components/Toast";
-
-const STATUS_LABEL: Record<string, string> = {
-  pending: "待执行",
-  running: "执行中",
-  completed: "已完成",
-  failed: "失败",
-};
-
-const STATUS_CLASS: Record<string, string> = {
-  pending: "bg-gray-100 text-gray-600",
-  running: "bg-blue-100 text-blue-700",
-  completed: "bg-green-100 text-green-700",
-  failed: "bg-red-100 text-red-700",
-};
+import { EvaluationStatusBadge } from "@/components/EvaluationStatusBadge";
 
 export default function EvaluationPage() {
   const [list, setList] = useState<EvaluationTask[]>([]);
@@ -132,26 +119,20 @@ export default function EvaluationPage() {
           </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="stagger-reveal grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {list.map((task) => (
             <div
               key={task.id}
-              className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow"
+              className="rounded-xl border border-gray-200 bg-white p-5 transition-shadow hover:shadow-md"
             >
-              <div className="flex items-start justify-between mb-3">
+              <div className="mb-3 flex items-start justify-between gap-2">
                 <Link
                   href={PATH.evaluationDetail(task.id)}
-                  className="text-base font-semibold text-gray-800 hover:text-blue-600 transition-colors line-clamp-1"
+                  className="line-clamp-1 text-base font-semibold text-gray-800 transition-colors hover:text-blue-600"
                 >
                   {task.name}
                 </Link>
-                <span
-                  className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full flex-shrink-0 ${
-                    STATUS_CLASS[task.status] ?? "bg-gray-100 text-gray-600"
-                  }`}
-                >
-                  {STATUS_LABEL[task.status] ?? task.status}
-                </span>
+                <EvaluationStatusBadge status={task.status} className="shrink-0" />
               </div>
               <p className="text-sm text-gray-500 mb-3 line-clamp-2 min-h-[2.5rem]">
                 {task.description || "暂无描述"}

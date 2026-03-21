@@ -18,7 +18,6 @@ export const PATH = {
   evaluation: "/dashboard/evaluation",
   evaluationNew: "/dashboard/evaluation/new",
   evaluationDetail: (id: string | number) => `/dashboard/evaluation/${id}`,
-  apiKeys: "/dashboard/api-keys",
   modelConfig: "/dashboard/model-config",
 } as const;
 
@@ -32,7 +31,6 @@ const STATIC_CRUMB: Record<string, string> = {
   [PATH.chat]: "对话",
   [PATH.evaluation]: "RAG 评估",
   [PATH.evaluationNew]: "新建评估",
-  [PATH.apiKeys]: "API 密钥",
   [PATH.modelConfig]: "模型配置",
 };
 

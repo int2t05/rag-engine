@@ -10,10 +10,20 @@ import asyncio
 import logging
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+import httpx
 from openai import AsyncOpenAI
 
 from app.schemas.ai_runtime import AiRuntimeSettings
-from app.modules.evaluation.evaluation_config import SCORE_KEYS
+from app.modules.evaluation.evaluation_config import (
+    EVAL_HTTP_TIMEOUT_SEC,
+    EVAL_RAGAS_ASCORE_CALL_TIMEOUT_SEC,
+    SCORE_KEYS,
+)
+
+_HTTPX_TIMEOUT = httpx.Timeout(
+    float(EVAL_HTTP_TIMEOUT_SEC),
+    connect=min(30.0, float(EVAL_HTTP_TIMEOUT_SEC)),
+)
 
 from ragas.metrics.collections import (
     AnswerCorrectness,
@@ -140,11 +150,19 @@ def build_ragas_llm(ai: AiRuntimeSettings) -> Any:
 
     p = (ai.chat_provider or "openai").lower()
     if p == "openai":
-        c = AsyncOpenAI(api_key=ai.openai_api_key, base_url=_base(ai.openai_api_base))
+        c = AsyncOpenAI(
+            api_key=ai.openai_api_key,
+            base_url=_base(ai.openai_api_base),
+            timeout=_HTTPX_TIMEOUT,
+        )
         return llm_factory(ai.openai_model, client=c, max_tokens=4096)
     if p == "ollama":
         h = _ollama_host(ai.ollama_api_base)
-        c = AsyncOpenAI(base_url=f"{h}/v1", api_key="ollama")
+        c = AsyncOpenAI(
+            base_url=f"{h}/v1",
+            api_key="ollama",
+            timeout=_HTTPX_TIMEOUT,
+        )
         return llm_factory(ai.ollama_model, client=c, max_tokens=4096)
     raise ValueError(f"RAGAS 评估需要 chat_provider 为 openai 或 ollama，当前为 {p!r}")
 
@@ -159,7 +177,11 @@ def build_ragas_embeddings(ai: AiRuntimeSettings) -> Any:
         return embedding_factory(
             "openai",
             model=model,
-            client=AsyncOpenAI(api_key=key, base_url=_base(base)),
+            client=AsyncOpenAI(
+                api_key=key,
+                base_url=_base(base),
+                timeout=_HTTPX_TIMEOUT,
+            ),
             interface="modern",
         )
 
@@ -174,7 +196,11 @@ def build_ragas_embeddings(ai: AiRuntimeSettings) -> Any:
         return embedding_factory(
             "openai",
             model=ai.ollama_embeddings_model,
-            client=AsyncOpenAI(base_url=f"{h}/v1", api_key="ollama"),
+            client=AsyncOpenAI(
+                base_url=f"{h}/v1",
+                api_key="ollama",
+                timeout=_HTTPX_TIMEOUT,
+            ),
             interface="modern",
         )
     raise ValueError(
@@ -260,12 +286,34 @@ _KW: Dict[str, Callable[[str, str, List[str], str], dict]] = {
 }
 
 
-async def _ascore_retry(metric: Any, label: str, kwargs: dict, max_retries: int = 5) -> float:
+async def _ascore_retry(
+    metric: Any,
+    label: str,
+    kwargs: dict,
+    max_retries: int = 3,
+) -> float:
     last: Optional[BaseException] = None
     for i in range(1, max_retries + 1):
         try:
-            r = await metric.ascore(**kwargs)
+            r = await asyncio.wait_for(
+                metric.ascore(**kwargs),
+                timeout=float(EVAL_RAGAS_ASCORE_CALL_TIMEOUT_SEC),
+            )
             return float(r.value)
+        except asyncio.TimeoutError as e:
+            last = e
+            logging.warning(
+                "RAGAS 指标 %s 单次 ascore 超过 %ss（第 %s/%s 次）",
+                label,
+                EVAL_RAGAS_ASCORE_CALL_TIMEOUT_SEC,
+                i,
+                max_retries,
+            )
+            if i == max_retries:
+                raise TimeoutError(
+                    f"指标 {label} 在 {EVAL_RAGAS_ASCORE_CALL_TIMEOUT_SEC}s 内未完成（已重试 {max_retries} 次）"
+                ) from e
+            await asyncio.sleep(1)
         except Exception as e:
             last = e
             if i == max_retries:
@@ -282,7 +330,7 @@ async def evaluate_metrics_sample(
     response: str,
     retrieved_contexts: List[str],
     reference: str,
-    max_retries: int = 5,
+    max_retries: int = 3,
 ) -> Dict[str, Any]:
     scores: Dict[str, Optional[float]] = {k: None for k in SCORE_KEYS}
     skipped: Dict[str, str] = {}

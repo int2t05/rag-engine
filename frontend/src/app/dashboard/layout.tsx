@@ -9,7 +9,6 @@ import {
   ChatIcon,
   CpuChipIcon,
   HomeIcon,
-  KeyIcon,
   LogoutIcon,
   MenuIcon,
   XIcon,
@@ -22,7 +21,6 @@ const DASHBOARD_NAV = [
   { href: PATH.chat, label: "对话", icon: ChatIcon },
   { href: PATH.evaluation, label: "RAG 评估", icon: ChartBarIcon },
   { href: PATH.modelConfig, label: "模型配置", icon: CpuChipIcon },
-  { href: PATH.apiKeys, label: "API 密钥", icon: KeyIcon },
 ] as const;
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -95,7 +93,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </button>
       </div>
 
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
+      <nav className="stagger-reveal flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
         {DASHBOARD_NAV.map((item) => {
           const active =
             item.href === PATH.dashboard ? pathname === PATH.dashboard : pathname.startsWith(item.href);

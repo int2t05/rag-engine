@@ -28,8 +28,8 @@ logging.basicConfig(
 )
 
 # uvicorn app.main:app --reload
-
-
+# docker compose -f docker-compose.infra.yml down -v  
+# docker compose -f docker-compose.infra.yml up -d   
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """

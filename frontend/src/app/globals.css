@@ -7,9 +7,17 @@
   --foreground: #0c0f14;
 }
 
+/**
+ * 页面底色：暖灰 + 极低对比渐变 mesh，与 accent 青绿呼应（frontend-design：层次而非平涂）
+ */
 body {
   color: var(--foreground);
-  background: var(--background);
+  background-color: var(--background);
+  background-image:
+    radial-gradient(ellipse 120% 70% at 100% 0%, rgba(13, 114, 110, 0.07), transparent 52%),
+    radial-gradient(ellipse 90% 55% at 0% 100%, rgba(12, 15, 20, 0.045), transparent 48%),
+    radial-gradient(ellipse 60% 40% at 50% 50%, rgba(255, 255, 255, 0.5), transparent 70%);
+  background-attachment: fixed;
 }
 
 @layer utilities {
@@ -50,6 +58,20 @@ body {
 .animate-scale-in { animation: scale-in 0.2s ease-out forwards; }
 .animate-slide-in-right { animation: slide-in-right 0.25s ease-out forwards; }
 .animate-slide-in-left  { animation: slide-in-left 0.25s ease-out forwards; }
+
+/** 列表/卡片首屏入场：父级加 .stagger-reveal，子项依次延迟 */
+.stagger-reveal > * {
+  animation: fade-in 0.32s ease-out both;
+}
+.stagger-reveal > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-reveal > *:nth-child(2) { animation-delay: 45ms; }
+.stagger-reveal > *:nth-child(3) { animation-delay: 90ms; }
+.stagger-reveal > *:nth-child(4) { animation-delay: 135ms; }
+.stagger-reveal > *:nth-child(5) { animation-delay: 180ms; }
+.stagger-reveal > *:nth-child(6) { animation-delay: 225ms; }
+.stagger-reveal > *:nth-child(7) { animation-delay: 270ms; }
+.stagger-reveal > *:nth-child(8) { animation-delay: 315ms; }
+.stagger-reveal > *:nth-child(n+9) { animation-delay: 360ms; }
 
 /* ---------- scrollbar ---------- */
 

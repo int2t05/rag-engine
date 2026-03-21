@@ -4,7 +4,7 @@
  */
 
 "use client";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -12,11 +12,9 @@ import {
   ApiError,
   KnowledgeBase,
   DocumentItem,
-  UploadResult,
-  TaskStatus,
-  PreviewResult,
   RetrievalResult,
 } from "@/lib/api";
+import { useDocumentPipeline } from "@/hooks/useDocumentPipeline";
 import { PATH } from "@/lib/routes";
 import {
   ArrowLeftIcon,
@@ -37,21 +35,31 @@ import {
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CHUNK_SIZE,
   DEFAULT_TOP_K,
-  parseChunkOverlap,
-  parseChunkSize,
   parseTopK,
 } from "@/lib/form-defaults";
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: "等待处理", color: "text-yellow-600 bg-yellow-50" },
-  processing: { label: "处理中", color: "text-blue-600 bg-blue-50" },
-  completed: { label: "已完成", color: "text-green-600 bg-green-50" },
-  failed: { label: "失败", color: "text-red-600 bg-red-50" },
-  exists: { label: "已存在", color: "text-gray-600 bg-gray-100" },
+  pending: {
+    label: "等待处理",
+    color: "border border-amber-200/90 bg-amber-50 text-amber-950",
+  },
+  processing: {
+    label: "处理中",
+    color: "border border-sky-200/90 bg-sky-50 text-sky-950",
+  },
+  completed: {
+    label: "已完成",
+    color: "border border-emerald-200/90 bg-emerald-50 text-emerald-950",
+  },
+  failed: { label: "失败", color: "border border-rose-200/90 bg-rose-50 text-rose-950" },
+  exists: { label: "已存在", color: "border border-border bg-surface-muted text-muted" },
 };
 
 function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_MAP[status] ?? { label: status, color: "text-gray-600 bg-gray-100" };
+  const s = STATUS_MAP[status] ?? {
+    label: status,
+    color: "border border-border bg-surface-muted text-muted",
+  };
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${s.color}`}>
       {s.label}
@@ -67,24 +75,6 @@ export default function KnowledgeBaseDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [toast, setToast] = useState({ msg: "", type: "success" as "success" | "error" | "info", show: false });
-
-  const [uploading, setUploading] = useState(false);
-  const [uploadResults, setUploadResults] = useState<UploadResult[]>([]);
-  const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [processing, setProcessing] = useState(false);
-  const [pollingTaskIds, setPollingTaskIds] = useState<number[]>([]);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  /** 留空则在预览时按系统默认（与向量化处理一致） */
-  const [chunkSizeInput, setChunkSizeInput] = useState("");
-  const [chunkOverlapInput, setChunkOverlapInput] = useState("");
-  const [previewing, setPreviewing] = useState(false);
-  const [previewData, setPreviewData] = useState<Record<number, PreviewResult>>({});
-  const [previewError, setPreviewError] = useState("");
-  const [showPreview, setShowPreview] = useState(false);
-  const [expandedChunks, setExpandedChunks] = useState<Set<string>>(new Set());
 
   const [cleaning, setCleaning] = useState(false);
   const [deletingDoc, setDeletingDoc] = useState<number | null>(null);
@@ -177,133 +167,39 @@ export default function KnowledgeBaseDetailPage() {
     fetchKb();
   }, [fetchKb]);
 
-  /** 刷新后仍有队列中的上传任务时，自动加入轮询以便更新文档列表中的处理状态 */
-  useEffect(() => {
-    const pending = kb?.pending_upload_tasks;
-    if (!pending?.length) return;
-    const ids = pending.map((t) => t.task_id);
-    setPollingTaskIds((prev) => {
-      const newIds = ids.filter((id) => !prev.includes(id));
-      if (newIds.length === 0) return prev;
-      return [...prev, ...newIds];
-    });
-  }, [kb]);
+  const pendingUploadTaskIds = useMemo(
+    () => kb?.pending_upload_tasks?.map((t) => t.task_id) ?? [],
+    [kb?.pending_upload_tasks],
+  );
 
-  const handleUpload = async (files: FileList | File[]) => {
-    if (!files.length) return;
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      Array.from(files).forEach((f) => formData.append("files", f));
-      const results: UploadResult[] = await knowledgeBaseApi.uploadDocuments(Number(id), formData);
-      setUploadResults(results);
-      showToast(`已上传 ${results.length} 个文件`, "success");
-    } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "上传失败", "error");
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) handleUpload(e.target.files);
-    e.target.value = "";
-  };
-
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    if (e.dataTransfer.files) handleUpload(e.dataTransfer.files);
-  };
-
-  const handlePreview = async () => {
-    const docIds = uploadResults
-      .filter((r) => !r.skip_processing)
-      .map((r) => r.upload_id)
-      .filter((uid): uid is number => uid !== undefined);
-
-    if (!docIds.length) return;
-
-    setPreviewing(true);
-    setPreviewError("");
-    setPreviewData({});
-    const cs = parseChunkSize(chunkSizeInput);
-    const co = parseChunkOverlap(chunkOverlapInput, cs);
-    try {
-      const data = await knowledgeBaseApi.previewDocuments(Number(id), {
-        document_ids: docIds,
-        chunk_size: cs,
-        chunk_overlap: co,
-      });
-      setPreviewData(data);
-      setShowPreview(true);
-    } catch (err) {
-      setPreviewError(err instanceof ApiError ? err.message : "预览失败");
-    } finally {
-      setPreviewing(false);
-    }
-  };
-
-  const handleProcess = async () => {
-    const toProcess = uploadResults.filter((r) => !r.skip_processing);
-    if (!toProcess.length) return;
-
-    setProcessing(true);
-    try {
-      const res = await knowledgeBaseApi.processDocuments(Number(id), uploadResults);
-      const tasks: { upload_id: number; task_id: number }[] = res.tasks;
-      if (tasks.length > 0) {
-        setPollingTaskIds(tasks.map((t) => t.task_id));
-      } else {
-        await fetchKb();
-        setUploadResults([]);
-      }
-    } catch (err) {
-      showToast(err instanceof ApiError ? err.message : "处理失败", "error");
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  useEffect(() => {
-    if (pollingTaskIds.length === 0) {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-      return;
-    }
-
-    const poll = async () => {
-      try {
-        const data = await knowledgeBaseApi.getProcessingTasks(Number(id), pollingTaskIds);
-        const mapped: Record<number, TaskStatus> = {};
-        for (const [k, v] of Object.entries(data)) {
-          mapped[Number(k)] = v as TaskStatus;
-        }
-
-        // 同步刷新知识库详情，使文档列表出现新行并展示 processing_tasks（处理中状态）
-        await fetchKb();
-
-        const statuses = pollingTaskIds.map((tid) => mapped[tid]);
-        const allDone =
-          statuses.length === pollingTaskIds.length &&
-          statuses.every(
-            (t) => t && (t.status === "completed" || t.status === "failed"),
-          );
-        if (allDone) {
-          setPollingTaskIds([]);
-          setUploadResults([]);
-          showToast("文档处理完成", "success");
-        }
-      } catch {
-        // ignore
-      }
-    };
-
-    poll();
-    pollingRef.current = setInterval(poll, 3000);
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, [pollingTaskIds, id, fetchKb, showToast]);
+  const {
+    uploading,
+    uploadResults,
+    dragOver,
+    setDragOver,
+    fileInputRef,
+    processing,
+    pollingTaskIds,
+    chunkSizeInput,
+    setChunkSizeInput,
+    chunkOverlapInput,
+    setChunkOverlapInput,
+    previewing,
+    previewData,
+    previewError,
+    showPreview,
+    setShowPreview,
+    expandedChunks,
+    onFileChange,
+    onDrop,
+    handlePreview,
+    handleProcess,
+    toggleChunkExpand,
+  } = useDocumentPipeline(Number(id), {
+    fetchKb,
+    showToast,
+    pendingUploadTaskIds,
+  });
 
   const handleCleanup = async () => {
     setCleaning(true);
@@ -587,14 +483,7 @@ export default function KnowledgeBaseDetailPage() {
                                 <div
                                   key={chunkKey}
                                   className="px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors"
-                                  onClick={() => {
-                                    setExpandedChunks((prev) => {
-                                      const next = new Set(prev);
-                                      if (next.has(chunkKey)) next.delete(chunkKey);
-                                      else next.add(chunkKey);
-                                      return next;
-                                    });
-                                  }}
+                                  onClick={() => toggleChunkExpand(chunkKey)}
                                 >
                                   <div className="flex items-center justify-between mb-1">
                                     <span className="text-xs font-mono text-gray-400">
