@@ -4,7 +4,7 @@
 定义用户表的数据库结构。
 
 对应数据库表名：users
-每个用户可以拥有多个知识库、多个对话、多个 API 密钥。
+每个用户可以拥有多个知识库、多个对话。
 """
 
 from sqlalchemy import Boolean, Column, Integer, String, ForeignKey
@@ -31,7 +31,6 @@ class User(Base, TimestampMixin):
     关系说明（relationship）：
     - knowledge_bases: 用户创建的所有知识库
     - chats: 用户的所有对话
-    - api_keys: 用户的所有 API 密钥
     """
     __tablename__ = "users"
 
@@ -52,7 +51,6 @@ class User(Base, TimestampMixin):
     # relationship 定义了 Python 对象间的关联，可以通过 user.knowledge_bases 直接访问
     knowledge_bases = relationship("KnowledgeBase", back_populates="user")
     chats = relationship("Chat", back_populates="user")
-    api_keys = relationship("APIKey", back_populates="user", cascade="all, delete-orphan")
     # 与 llm_embedding_configs 表有两条 FK（user_id 归属 + active_llm_embedding_config_id），
     # 必须显式声明本关系走 user_id。
     llm_embedding_configs = relationship(

@@ -36,9 +36,6 @@ langchain-openai==1.1.11
 # ===== Vector Stores =====
 chromadb==1.5.5
 langchain-chroma==1.1.0
-# 代码直接使用 qdrant_client，且向量实现来自 langchain_community.vectorstores.Qdrant
-# （未使用 langchain-qdrant 包，已移除以免重复/版本冲突）
-qdrant-client==1.17.1
 
 # ===== LLM Providers =====
 openai==2.29.0
@@ -47,3 +44,6 @@ langchain-ollama==1.0.1
 # ===== RAG Evaluation (Optional) =====
 ragas==0.4.3
 datasets==4.8.3
+
+# ===== Dev / tests =====
+pytest==8.4.2

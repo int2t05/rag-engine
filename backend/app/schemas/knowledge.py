@@ -141,3 +141,17 @@ class PreviewRequest(BaseModel):
     document_ids: List[int]  # 要预览的文档（或上传记录）ID
     chunk_size: int = 1000  # 每个块的最大字符数
     chunk_overlap: int = 200  # 块之间的重叠字符数，保持上下文连贯
+
+
+class TestRetrievalRequest(BaseModel):
+    """控制台检索测试请求体"""
+
+    query: str
+    kb_id: int
+    top_k: int
+
+
+class BatchDeleteDocumentsRequest(BaseModel):
+    """批量删除文档请求体"""
+
+    document_ids: List[int]

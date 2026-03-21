@@ -1,0 +1,11 @@
+# Conda 环境：Python 3.11，与 MVP 后端一致。
+# 创建：conda env create -f environment.yml
+# 激活：conda activate p311
+name: p311
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - -r requirements.txt

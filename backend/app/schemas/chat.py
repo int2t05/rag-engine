@@ -39,6 +39,22 @@ class ChatBase(BaseModel):
     title: str
 
 
+class ChatMessageItem(BaseModel):
+    """单条对话消息（流式发送接口）"""
+
+    role: str
+    content: str
+
+
+class StreamMessagesRequest(BaseModel):
+    """
+    发送消息流式接口请求体。
+    与前端 useChat 约定一致：messages 为完整历史，最后一条须为 user。
+    """
+
+    messages: List[ChatMessageItem]
+
+
 class ChatCreate(ChatBase):
     """创建对话时的请求体，需指定关联的知识库 ID 列表"""
 

@@ -9,7 +9,6 @@ from .user import User
 from .llm_embedding_config import LlmEmbeddingConfig
 from .knowledge import KnowledgeBase, Document, DocumentChunk
 from .chat import Chat, Message
-from .api_key import APIKey
 from .evaluation import EvaluationTask, EvaluationTestCase, EvaluationResult
 
 __all__ = [
@@ -20,7 +19,6 @@ __all__ = [
     "DocumentChunk",
     "Chat",
     "Message",
-    "APIKey",
     "EvaluationTask",
     "EvaluationTestCase",
     "EvaluationResult",

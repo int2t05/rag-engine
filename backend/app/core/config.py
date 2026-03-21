@@ -64,13 +64,9 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = Field(default="minioadmin", alias="MINIO_SECRET_KEY")
     MINIO_BUCKET_NAME: str = Field(default="documents", alias="MINIO_BUCKET_NAME")
 
-    # ---------- 向量数据库 ----------
-    # 向量存储类型：chroma（默认）或 qdrant
-    VECTOR_STORE_TYPE: str = Field(default="chroma", alias="VECTOR_STORE_TYPE")
+    # ---------- 向量数据库（MVP 仅 Chroma）----------
     CHROMA_DB_HOST: str = Field(default="localhost", alias="CHROMA_DB_HOST")
     CHROMA_DB_PORT: int = Field(default=8001, alias="CHROMA_DB_PORT")
-    QDRANT_URL: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
-    QDRANT_PREFER_GRPC: bool = Field(default=True, alias="QDRANT_PREFER_GRPC")
 
     # LLM / 嵌入 API 由用户在「模型配置」中写入数据库，不经由本文件或 .env
 

@@ -4,18 +4,20 @@ RAG Web UI 后端应用入口
 这是整个后端的启动文件，负责：
 1. 创建 FastAPI 应用实例
 2. 注册所有 API 路由
-3. 在应用启动时初始化 MinIO 和数据库迁移
+3. 在应用 lifespan 启动阶段初始化 MinIO 和数据库迁移
 """
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.api.api_v1.api import api_router
-from app.api.openapi.api import router as openapi_router
+from app.api.errors import http_exception_from_service
 from app.core.config import settings
+from app.core.exceptions import AppServiceError
 from app.core.minio import init_minio
 from app.startup.migrate import DatabaseMigrator
 
@@ -27,6 +29,19 @@ logging.basicConfig(
 
 # uvicorn app.main:app --reload
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    应用生命周期：启动时初始化 MinIO、执行 Alembic 迁移；关闭时无额外清理。
+    使用 lifespan 替代已弃用的 @app.on_event("startup")（见 FastAPI 文档 Advanced → Events）。
+    """
+    init_minio()
+    migrator = DatabaseMigrator(settings.get_database_url)
+    migrator.run_migrations()
+    yield
+
+
 # 创建 FastAPI 应用实例
 # title 和 version 会显示在自动生成的 API 文档中
 # openapi_url 指定 OpenAPI JSON 的访问路径
@@ -34,6 +49,7 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -46,24 +62,20 @@ app.add_middleware(
 )
 
 # 注册内部 API 路由（JWT 认证），前缀为 /api
-# 包含：/api/auth、/api/knowledge-base、/api/chat、/api/api-keys、/api/evaluation
+# 包含：/api/auth、/api/knowledge-base、/api/chat、/api/evaluation、/api/llm-configs
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# 注册 OpenAPI 路由（API Key 认证），前缀为 /openapi
-# 供外部系统通过 API Key 调用知识库查询功能
-app.include_router(openapi_router, prefix="/openapi")
 
-
-@app.on_event("startup")
-async def startup_event():
-    """
-    应用启动时执行的初始化操作：
-    1. 初始化 MinIO：确保存储桶存在
-    2. 运行数据库迁移：自动更新数据库表结构到最新版本
-    """
-    init_minio()
-    migrator = DatabaseMigrator(settings.get_database_url)
-    migrator.run_migrations()
+@app.exception_handler(AppServiceError)
+async def app_service_error_handler(request: Request, exc: AppServiceError) -> JSONResponse:
+    """统一将服务层可预期异常映射为 JSON，与路由内手动 raise HTTPException 行为一致。"""
+    http_exc = http_exception_from_service(exc)
+    headers = dict(http_exc.headers) if http_exc.headers else None
+    return JSONResponse(
+        status_code=http_exc.status_code,
+        content={"detail": http_exc.detail},
+        headers=headers,
+    )
 
 
 @app.get("/")
