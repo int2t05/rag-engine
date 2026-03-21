@@ -29,7 +29,6 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   formatFileSize,
   getDisplayProcessingTask,
-  getLatestProcessingTask,
   isDocumentProcessing,
 } from "@/lib/utils";
 import {
@@ -602,7 +601,6 @@ export default function KnowledgeBaseDetailPage() {
               </div>
             ))}
             {kb.documents.map((doc: DocumentItem) => {
-              const lastTask = getLatestProcessingTask(doc);
               const displayTask = getDisplayProcessingTask(doc);
               const busy = isDocumentProcessing(doc);
               const rowMain = (

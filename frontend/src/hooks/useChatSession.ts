@@ -122,9 +122,11 @@ export function useChatSession() {
     );
   }, [messages]);
 
+  const pollingChatId = currentChat?.id;
+
   /** 刷新后仍可能后台在写库：轮询直到助手消息非空或超时 */
   useEffect(() => {
-    if (!currentChat || sending || streaming || !lastAssistantPending) return;
+    if (pollingChatId == null || sending || streaming || !lastAssistantPending) return;
 
     let attempts = 0;
     const maxAttempts = 120;
@@ -135,7 +137,7 @@ export function useChatSession() {
         return;
       }
       try {
-        const fullChat = await chatApi.get(currentChat.id);
+        const fullChat = await chatApi.get(pollingChatId);
         const parsed = parseChatMessagesFromApi(fullChat);
         setCurrentChat(fullChat);
         setMessages(parsed);
@@ -148,7 +150,7 @@ export function useChatSession() {
       }
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [currentChat?.id, sending, streaming, lastAssistantPending]);
+  }, [pollingChatId, sending, streaming, lastAssistantPending]);
 
   const handleSelectChat = useCallback(
     async (chat: Chat) => {
