@@ -390,13 +390,8 @@ def _process_document_background_sync(
                     source=source,
                 )
                 logger.info(f"任务{task_id}：文件已移动到永久存储")
-
-                # 删除临时文件
-                logger.info(f"任务{task_id}：从MinIO中删除临时文件")
-                minio_client.remove_object(
-                    bucket_name=settings.MINIO_BUCKET_NAME, object_name=temp_path
-                )
-                logger.info(f"任务{task_id}：已删除临时文件")
+                # MinIO 临时对象在处理链全部成功后再删除（见下方 commit 之后），
+                # 避免处理中途临时路径仍被依赖时与「清理」或重试逻辑冲突。
             except MinioException as e:
                 error_msg = f"无法将文件移动到永久存储：{str(e)}"
                 logger.error(f"任务{task_id}：{error_msg}")
@@ -473,6 +468,17 @@ def _process_document_background_sync(
 
             db.commit()
             logger.info(f"任务{task_id}：处理成功完成")
+
+            try:
+                logger.info(f"任务{task_id}：从 MinIO 删除临时对象（处理已完成）")
+                minio_client.remove_object(
+                    bucket_name=settings.MINIO_BUCKET_NAME, object_name=temp_path
+                )
+                logger.info(f"任务{task_id}：已删除 MinIO 临时对象")
+            except Exception as e:
+                logger.warning(
+                    f"任务{task_id}：删除 MinIO 临时对象失败（可稍后手动清理）：{e}"
+                )
 
         finally:
             # 清理本地临时文件

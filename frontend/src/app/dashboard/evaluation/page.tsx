@@ -67,7 +67,9 @@ export default function EvaluationPage() {
     const t = confirmDelete;
     setDeleting(t.id);
     try {
-      await evaluationApi.delete(t.id);
+      await evaluationApi.delete(t.id, {
+        force: t.status === "running",
+      });
       setList((prev) => prev.filter((item) => item.id !== t.id));
       showToast("评估任务已删除", "success");
     } catch (err) {
@@ -184,10 +186,14 @@ export default function EvaluationPage() {
                 </Link>
                 <button
                   onClick={() => setConfirmDelete(task)}
-                  disabled={deleting === task.id || task.status === "running"}
+                  disabled={deleting === task.id}
                   className="flex-1 text-center py-1.5 text-sm text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
                 >
-                  {deleting === task.id ? "删除中..." : "删除"}
+                  {deleting === task.id
+                    ? "删除中..."
+                    : task.status === "running"
+                      ? "强制删除"
+                      : "删除"}
                 </button>
               </div>
             </div>
@@ -197,9 +203,17 @@ export default function EvaluationPage() {
 
       <ConfirmDialog
         open={!!confirmDelete}
-        title="删除评估任务"
-        description={`确定要删除评估任务「${confirmDelete?.name}」吗？此操作不可恢复，测试用例和评估结果将一并删除。`}
-        confirmText="删除"
+        title={
+          confirmDelete?.status === "running"
+            ? "强制删除评估任务"
+            : "删除评估任务"
+        }
+        description={
+          confirmDelete?.status === "running"
+            ? `任务「${confirmDelete.name}」正在执行中。强制删除将立即移除任务及数据，后台进程可能仍会短暂运行直至结束。确定继续？`
+            : `确定要删除评估任务「${confirmDelete?.name}」吗？此操作不可恢复，测试用例和评估结果将一并删除。`
+        }
+        confirmText={confirmDelete?.status === "running" ? "强制删除" : "删除"}
         variant="danger"
         loading={deleting !== null}
         onConfirm={doDelete}

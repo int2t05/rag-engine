@@ -7,7 +7,7 @@ RAG 评估 API
 
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
@@ -187,10 +187,14 @@ def get_evaluation_task(
 @router.delete("/{task_id}")
 def delete_evaluation_task(
     task_id: int,
+    force: bool = Query(
+        False,
+        description="为 true 时允许删除执行中的任务（后台进程可能仍会短暂写入，请谨慎使用）",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    """删除评估任务（级联删除测试用例与结果）"""
+    """删除评估任务（级联删除测试用例与结果）。执行中任务需传 force=true 强制删除。"""
     task = (
         db.query(EvaluationTask)
         .filter(
@@ -201,8 +205,11 @@ def delete_evaluation_task(
     )
     if not task:
         raise HTTPException(status_code=404, detail="评估任务不存在")
-    if task.status == "running":
-        raise HTTPException(status_code=400, detail="任务正在执行中，无法删除")
+    if task.status == "running" and not force:
+        raise HTTPException(
+            status_code=400,
+            detail="任务正在执行中，无法删除；若需终止并删除请使用强制删除（force=true）",
+        )
 
     db.delete(task)
     db.commit()

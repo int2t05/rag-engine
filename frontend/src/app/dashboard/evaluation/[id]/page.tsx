@@ -169,14 +169,16 @@ export default function EvaluationDetailPage() {
   const handleDelete = useCallback(async () => {
     setDeleting(true);
     try {
-      await evaluationApi.delete(taskId);
+      await evaluationApi.delete(taskId, {
+        force: task?.status === "running",
+      });
       showToastMsg("评估任务已删除", "success");
       setTimeout(() => router.replace(PATH.evaluation), 400);
     } catch (err) {
       showToastMsg(err instanceof ApiError ? err.message : "删除失败", "error");
       setDeleting(false);
     }
-  }, [taskId, router, showToastMsg]);
+  }, [taskId, task?.status, router, showToastMsg]);
 
   if (loading) {
     return (
@@ -253,15 +255,17 @@ export default function EvaluationDetailPage() {
                 {running ? "执行中..." : "开始评估"}
               </button>
             )}
-            {task.status !== "running" && (
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                disabled={deleting}
-                className="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-              >
-                {deleting ? "删除中..." : "删除"}
-              </button>
-            )}
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={deleting}
+              className="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {deleting
+                ? "删除中..."
+                : task.status === "running"
+                  ? "强制删除"
+                  : "删除"}
+            </button>
           </div>
         </div>
       </div>
@@ -526,9 +530,15 @@ export default function EvaluationDetailPage() {
 
       <ConfirmDialog
         open={showDeleteConfirm}
-        title="删除评估任务"
-        description={`确定要删除评估任务「${task.name}」吗？此操作不可恢复，测试用例和评估结果将一并删除。`}
-        confirmText="删除"
+        title={
+          task.status === "running" ? "强制删除评估任务" : "删除评估任务"
+        }
+        description={
+          task.status === "running"
+            ? `任务「${task.name}」正在执行中。强制删除将立即移除任务及数据，后台进程可能仍会短暂运行直至结束。确定继续？`
+            : `确定要删除评估任务「${task.name}」吗？此操作不可恢复，测试用例和评估结果将一并删除。`
+        }
+        confirmText={task.status === "running" ? "强制删除" : "删除"}
         variant="danger"
         loading={deleting}
         onConfirm={handleDelete}

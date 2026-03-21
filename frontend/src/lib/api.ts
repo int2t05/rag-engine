@@ -860,8 +860,13 @@ export const evaluationApi = {
   getResults: (id: number) =>
     api.get<EvaluationResult[]>(`/api/evaluation/${id}/results`),
 
-  delete: (id: number) =>
-    api.delete<{ message: string; task_id: number }>(`/api/evaluation/${id}`),
+  delete: (id: number, options?: { force?: boolean }) => {
+    const q =
+      options?.force === true ? "?force=true" : "";
+    return api.delete<{ message: string; task_id: number }>(
+      `/api/evaluation/${id}${q}`,
+    );
+  },
 
   /**
    * 向已有任务批量追加测试用例（请求体与创建任务时的 test_cases 结构一致）

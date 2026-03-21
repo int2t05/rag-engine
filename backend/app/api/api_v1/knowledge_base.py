@@ -10,7 +10,7 @@ import asyncio
 import hashlib
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 from typing import Any, Dict, List, Literal
 
@@ -30,6 +30,8 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.evaluation import EvaluationTask
 from app.models.chat import chat_knowledge_bases
+
+from app.models.base import BEIJING_TZ
 
 from app.core.config import settings
 from app.core.minio import get_minio_client
@@ -619,6 +621,7 @@ async def cleanup_temp_files(
     清除文档上传记录（DocumentUpload）及关联的任务处理记录（ProcessingTask），
     以及未指定文档的孤立任务（仅 status 字段）；并删除 MinIO 中的临时文件。
     任务正在运行（pending/processing）的不删除。
+    仅处理创建时间超过 24 小时的上传记录，避免清理尚未开始处理或正在排队的新上传。
     """
     # 排除有正在运行任务的上传记录
     running_upload_ids = (
@@ -629,9 +632,13 @@ async def cleanup_temp_files(
         )
         .distinct()
     )
+    cutoff = datetime.now(BEIJING_TZ) - timedelta(hours=24)
     uploads_to_delete = (
         db.query(DocumentUpload)
-        .filter(~DocumentUpload.id.in_(running_upload_ids))
+        .filter(
+            DocumentUpload.created_at < cutoff,
+            ~DocumentUpload.id.in_(running_upload_ids),
+        )
         .all()
     )
     upload_ids_to_delete = [u.id for u in uploads_to_delete]
