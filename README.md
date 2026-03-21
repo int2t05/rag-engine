@@ -1,166 +1,109 @@
 # RAG Engine
 
-基于 RAG (Retrieval-Augmented Generation) 技术的智能知识库问答系统。
+基于 RAG（Retrieval-Augmented Generation）的智能知识库问答系统（FastAPI + Next.js）。
+
+**文档语言 Documentation:** [中文索引](./docs/README.md) · [English index](./docs/README.en.md)
 
 ---
 
 ## 学习来源
 
-本项目的设计与实现参考了 [rag-web-ui/rag-web-ui](https://github.com/rag-web-ui/rag-web-ui)，这是一个优秀的开源 RAG Web UI 项目，提供了完整的学习路径和工程实践参考。
-
-### 核心学习点
-
-| 模块 | 学习来源 | 本项目实现 |
-|------|----------|-----------|
-| **整体架构** | [RAG Web UI 架构设计](https://github.com/rag-web-ui/rag-web-ui) | FastAPI + LangChain + 向量数据库 |
-| **文档处理流程** | [文档上传与异步处理](https://github.com/rag-web-ui/rag-web-ui/blob/main/docs/tutorial/README.md) | MinIO 存储 → 后台异步处理 → 分块向量化 |
-| **RAG 对话流程** | [RAG 教程](https://github.com/rag-web-ui/rag-web-ui/blob/main/docs/tutorial/README.md) | 历史感知检索 → 上下文组装 → 流式生成 |
-| **引用标注机制** | [引用格式设计](https://github.com/rag-web-ui/rag-web-ui/blob/main/docs/tutorial/README.md) | `[citation:N]` 格式 + 前端弹窗展示 |
-| **Factory 模式** | [向量库/模型工厂](https://github.com/rag-web-ui/rag-web-ui) | 向量数据库、Embedding、LLM 可插拔 |
-| **RAGAS 评估** | 项目自身扩展 | 评估指标：上下文相关性、忠实度、答案相关性 |
-
-> 详细的学习笔记和最佳实践请参考 [docs](./docs/) 目录下的文档：
-> - [RAG 对话业务流程最佳实践](./docs/RAG对话业务流程最佳实践.md)
-> - [文档上传与向量化业务流程最佳实践](./docs/文档上传与向量化业务流程最佳实践.md)
-> - [RAG 评估业务流程最佳实践](./docs/RAG评估业务流程最佳实践.md)
-> - [用户认证业务流程最佳实践](./docs/用户认证业务流程最佳实践.md)
+设计与实现参考 [rag-web-ui/rag-web-ui](https://github.com/rag-web-ui/rag-web-ui)。详细文档与目录说明见 [`docs/README.md`](./docs/README.md)（含与英文索引的切换链接）。
 
 ---
 
-## 功能特性
+## 功能概览
 
-### 知识库管理
-- 多格式文档支持 (PDF、DOCX、Markdown、TXT)
-- 文档自动分块和向量化
-- 增量更新机制（基于 Hash 对比）
-- 异步处理 + 状态轮询
-
-### RAG 对话
-- 基于知识库的智能问答
-- 多轮对话支持（历史感知检索）
-- 引用来源展示 `[citation:N]`
-- 流式响应（SSE）
-
-### 模型支持
-- **LLM**: OpenAI、DeepSeek、Ollama、Zhipu
-- **Embedding**: OpenAI、DashScope、Ollama、Zhipu
-- **向量库**: ChromaDB、Qdrant
-
-### 评估体系
-- RAGAS 评估框架
-- 多维度指标：Context Relevance、Faithfulness、Answer Relevancy
-- 评估报告生成
+- **知识库**：多格式文档上传、分块、向量化（Chroma）、任务状态
+- **对话**：多轮 RAG、引用标注 `[citation:N]`、SSE 流式输出
+- **模型配置**：用户侧多组 LLM/嵌入配置，数据库存储
+- **评估**：RAGAS 指标与任务（可选依赖）
 
 ---
 
-## 技术架构
+## 技术架构（摘要）
+
+| 层级 | 说明 |
+|------|------|
+| 前端 | Next.js（App Router） |
+| 后端 | FastAPI，`app.modules` 按业务域，`app.shared` 共享基础设施 |
+| 数据 | MySQL（元数据）、MinIO（对象）、**Chroma**（向量，MVP） |
+
+更完整的后端分层见 [`docs/架构/后端项目架构说明.md`](./docs/架构/后端项目架构说明.md)。
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              系统架构                                        │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-  ┌──────────────┐                      ┌──────────────┐
-  │    前端      │ ◀────── SSE ──────▶ │    后端      │
-  │  (Next.js)   │                      │  (FastAPI)   │
-  └──────────────┘                      └──────┬───────┘
-                                                 │
-                    ┌────────────────────────────┼────────────────────────────┐
-                    │                            │                            │
-                    ▼                            ▼                            ▼
-            ┌──────────────┐            ┌──────────────┐            ┌──────────────┐
-            │    MySQL     │            │   MinIO      │            │  Vector Store│
-            │  (元数据)     │            │  (文件存储)   │            │ (Chroma/Qdr)│
-            └──────────────┘            └──────────────┘            └──────────────┘
+┌─────────────┐     ┌─────────────┐     ┌──────────┐     ┌─────────────┐
+│  Frontend   │────▶│  FastAPI    │────▶│  MySQL   │     │   MinIO     │
+│  Next.js    │ SSE │  modules +  │     │          │     │  (objects)  │
+│             │◀────│  shared     │────▶│          │     └─────────────┘
+└─────────────┘     └──────┬──────┘     └──────────┘
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │   Chroma    │
+                    │  (vectors)  │
+                    └─────────────┘
 ```
 
 ---
 
 ## 快速开始
 
-### 环境要求
+### 环境
 
-- Python 3.9+
+- Python **3.11**（推荐 Conda：`backend/environment.yml`，环境名 `p311`）
 - Node.js 18+
-- MySQL 8.0+
-- MinIO
-- ChromaDB / Qdrant
+- MySQL 8、MinIO、Chroma（可用 `docker-compose.infra.yml` 起基础设施）
 
 ### 配置
 
 ```bash
-# 复制环境配置
 cp .env.example .env
-
-# 编辑 .env 配置数据库、API密钥等
+# 编辑 .env：数据库、MinIO、Chroma 等
 ```
 
-### 启动服务
+### 启动
 
 ```bash
-# 启动基础设施 (MySQL, MinIO, ChromaDB)
 docker compose -f docker-compose.infra.yml up -d
 
-# 启动后端
+# 后端（建议在 conda p311 中）
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 
-# 启动前端 (新终端)
+# 前端
 cd frontend
 pnpm install
 pnpm dev
 ```
 
+- API 文档：http://localhost:8000/docs  
+
 ---
 
-## 项目结构
+## 仓库结构（简）
 
 ```
 rag-engine/
-├── backend/
-│   ├── app/
-│   │   ├── api/api_v1/      # API 路由
-│   │   ├── core/            # 核心配置 (config, security)
-│   │   ├── models/          # 数据库模型
-│   │   ├── schemas/          # Pydantic schemas
-│   │   ├── services/         # 业务逻辑
-│   │   │   ├── chat_service.py      # RAG 对话核心
-│   │   │   ├── document_processor.py # 文档处理
-│   │   │   └── evaluation/           # RAGAS 评估
-│   │   └── main.py
-│   └── requirements.txt
+├── backend/app/
+│   ├── modules/       # 业务域：auth、knowledge、chat、evaluation、llm_config
+│   ├── shared/        # 嵌入、LLM、向量库、运行时配置加载
+│   ├── models/        # SQLAlchemy ORM
+│   ├── schemas/       # Pydantic
+│   ├── api/           # 依赖、错误映射；api_v1 汇总路由
+│   └── main.py
 ├── frontend/
-│   └── src/
-│       ├── app/             # Next.js App Router
-│       └── components/      # UI 组件
-├── docs/                    # 业务流程最佳实践文档
-├── docker-compose.yml
-└── README.md
+├── docs/              # 架构说明、业务流程索引；README / README.en 双语导航
+└── docker-compose.infra.yml
 ```
-
----
-
-## API 文档
-
-启动服务后访问：
-
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
 
 ---
 
 ## 相关资源
 
-### 学习资料
-- [RAG Web UI 教程](https://github.com/rag-web-ui/rag-web-ui/blob/main/docs/tutorial/README.md)
-- [LangChain 文档](https://python.langchain.com/)
-- [RAGAS 评估框架](https://docs.ragas.io/)
-- [ChromaDB 文档](https://docs.trychroma.com/)
-
-### 推荐延伸阅读
-- [Understanding RAG: Retrieval-Augmented Generation](https://arxiv.org/abs/2312.10911)
-- [RAGAS: Automated Evaluation of Retrieval Augmented Generation](https://arxiv.org/abs/2309.15217)
+- [LangChain](https://python.langchain.com/) · [RAGAS](https://docs.ragas.io/) · [Chroma](https://docs.trychroma.com/)
+- [FastAPI](https://fastapi.tiangolo.com/)
 
 ---
 
@@ -168,11 +111,7 @@ rag-engine/
 
 本项目仅供学习交流使用。
 
----
-
 ## 致谢
 
-- [rag-web-ui/rag-web-ui](https://github.com/rag-web-ui/rag-web-ui) - 主要学习来源
-- [FastAPI](https://fastapi.tiangolo.com/)
-- [LangChain](https://python.langchain.com/)
-- [ChromaDB](https://www.trychroma.com/)
+- [rag-web-ui/rag-web-ui](https://github.com/rag-web-ui/rag-web-ui)
+- [FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [ChromaDB](https://www.trychroma.com/)
