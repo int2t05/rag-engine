@@ -1,117 +1,76 @@
 # RAG Engine
 
-An intelligent knowledge-base Q&A system built on **RAG (Retrieval-Augmented Generation)** — **FastAPI** backend and **Next.js** frontend.
+A **FastAPI** + **LangChain 1.x (LCEL)** RAG stack: auth, knowledge bases, document ingestion, vector search, streaming chat, and optional RAG evaluation. The web UI uses **Next.js 14**.
 
-**Language / 语言:** [简体中文](README.md) · [English](README.en.md)
+## Stack (official docs)
 
----
+| Layer | Tech | Docs |
+|------|------|------|
+| API | FastAPI, `lifespan` | [FastAPI](https://fastapi.tiangolo.com/), [lifespan events](https://fastapi.tiangolo.com/advanced/events/) |
+| Config | Pydantic v2, pydantic-settings | [Pydantic](https://docs.pydantic.dev/latest/) |
+| DB | SQLAlchemy 2, Alembic | [SQLAlchemy 2.0](https://docs.sqlalchemy.org/en/20/), [Alembic](https://alembic.sqlalchemy.org/en/latest/) |
+| RAG | LangChain 1.x, LCEL | [LangChain Python](https://python.langchain.com/docs/) |
+| Vectors | Chroma, langchain-chroma | [Chroma](https://docs.trychroma.com/), [Chroma integration](https://python.langchain.com/docs/integrations/vectorstores/chroma/) |
+| Object storage | MinIO | [MinIO Python SDK](https://min.io/docs/minio/linux/developers/python/API.html) |
+| Evaluation (optional) | RAGAS | [RAGAS](https://docs.ragas.io/) |
+| Frontend | Next.js 14, React 18 | [Next.js](https://nextjs.org/docs) |
 
-## Origin & references
-
-Design and implementation draw from [rag-web-ui/rag-web-ui](https://github.com/rag-web-ui/rag-web-ui). Additional technical notes (mostly Chinese) live under [`docs/`](./docs/README.md).
-
----
-
-## Features
-
-- **Knowledge base**: multi-format upload, chunking, vectorization (**Chroma**), task status
-- **Chat**: multi-turn RAG, citation markers `[citation:N]`, SSE streaming
-- **Model config**: per-user LLM / embedding profiles stored in the database
-- **Evaluation**: RAGAS metrics and tasks (optional dependencies)
-
----
-
-## Architecture (summary)
-
-| Layer | Stack |
-|-------|--------|
-| Frontend | Next.js (App Router) |
-| Backend | FastAPI — `app.modules` (domains), `app.shared` (shared infra) |
-| Data | MySQL (metadata), MinIO (objects), **Chroma** (vectors, MVP) |
-
-See [`docs/架构/后端项目架构说明.md`](./docs/架构/后端项目架构说明.md) for backend layout (Chinese).
+## Layout
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌──────────┐     ┌─────────────┐
-│  Frontend   │────▶│  FastAPI    │────▶│  MySQL   │     │   MinIO     │
-│  Next.js    │ SSE │  modules +  │     │          │     │  (objects)  │
-│             │◀────│  shared     │────▶│          │     └─────────────┘
-└─────────────┘     └──────┬──────┘     └──────────┘
-                           │
-                           ▼
-                    ┌─────────────┐
-                    │   Chroma    │
-                    │  (vectors)  │
-                    └─────────────┘
+rag-engine/
+├── backend/
+├── frontend/
+├── docs/
+├── docker-compose.infra.yml
+├── docker-compose.dev.yml
+└── .env.example
 ```
-
----
 
 ## Quick start
 
-### Requirements
-
-- Python **3.11** (Conda recommended: `backend/environment.yml`, env name `p311`)
-- Node.js 18+
-- MySQL 8, MinIO, Chroma (e.g. `docker-compose.infra.yml`)
-
-### Configuration
-
-```bash
-cp .env.example .env
-# Edit .env: database, MinIO, Chroma, etc.
-```
-
-### Run
+### Infra (MySQL, Chroma, MinIO)
 
 ```bash
 docker compose -f docker-compose.infra.yml up -d
+```
 
-# Backend (prefer conda env p311)
+### Backend
+
+```bash
 cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+conda env create -f environment.yml
+conda activate p311
+# Copy .env.example to .env at repo root and set MYSQL_*, SECRET_KEY, MINIO_*, CHROMA_*, etc.
+cd ..
+uvicorn backend.app.main:app --reload --app-dir backend
+```
 
-# Frontend
+- OpenAPI UI: <http://127.0.0.1:8000/docs>
+- Health: `GET /api/health`
+
+### Model settings (required for chat)
+
+LLM and embedding endpoints are stored **in the database** (per-user “LLM config”), not only in `.env`. Enable a config in the app before using RAG. See [docs/业务流程/RAG评估与配置说明.md](docs/业务流程/RAG评估与配置说明.md) (Chinese).
+
+### Frontend
+
+```bash
 cd frontend
 pnpm install
 pnpm dev
 ```
 
-- API docs: http://localhost:8000/docs  
+## API prefix
 
----
+Default API prefix: `/api` (`API_V1_STR`): `/auth`, `/knowledge-base`, `/chat`, `/evaluation`, `/llm-configs`.
 
-## Repository layout
+## More docs
 
-```
-rag-engine/
-├── backend/app/
-│   ├── modules/       # Domains: auth, knowledge, chat, evaluation, llm_config
-│   ├── shared/        # Embeddings, LLM, vector store, runtime config
-│   ├── models/        # SQLAlchemy ORM
-│   ├── schemas/       # Pydantic
-│   ├── api/           # Dependencies, error mapping; api_v1 router aggregation
-│   └── main.py
-├── frontend/
-├── docs/              # Architecture notes, flow index (Chinese)
-└── docker-compose.infra.yml
-```
-
----
-
-## Resources
-
-- [LangChain](https://python.langchain.com/) · [RAGAS](https://docs.ragas.io/) · [Chroma](https://docs.trychroma.com/)
-- [FastAPI](https://fastapi.tiangolo.com/)
-
----
+- [docs/README.md](docs/README.md) (index, Chinese)
+- [Architecture](docs/架构/后端项目架构说明.md)
+- [Business flows](docs/业务流程/00-业务流程总览与索引.md)
 
 ## License
 
-For learning and communication only.
-
-## Acknowledgements
-
-- [rag-web-ui/rag-web-ui](https://github.com/rag-web-ui/rag-web-ui)
-- [FastAPI](https://fastapi.tiangolo.com/) · [LangChain](https://python.langchain.com/) · [ChromaDB](https://www.trychroma.com/)
+See `LICENSE` in the repository if present.
