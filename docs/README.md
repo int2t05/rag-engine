@@ -1,6 +1,6 @@
 # 文档索引
 
-**语言切换 Language:** [中文](README.md) · [English](README.en.md)
+**项目主页英文版**见仓库根目录 [`README.en.md`](../README.en.md)（与 [`README.md`](../README.md) 对应）。
 
 ---
 

@@ -2,13 +2,13 @@
 
 基于 RAG（Retrieval-Augmented Generation）的智能知识库问答系统（FastAPI + Next.js）。
 
-**文档语言 Documentation:** [中文索引](./docs/README.md) · [English index](./docs/README.en.md)
+**语言切换 Language:** [简体中文](README.md) · [English](README.en.md)
 
 ---
 
 ## 学习来源
 
-设计与实现参考 [rag-web-ui/rag-web-ui](https://github.com/rag-web-ui/rag-web-ui)。详细文档与目录说明见 [`docs/README.md`](./docs/README.md)（含与英文索引的切换链接）。
+设计与实现参考 [rag-web-ui/rag-web-ui](https://github.com/rag-web-ui/rag-web-ui)。更多技术说明见 [`docs/README.md`](./docs/README.md)（文档索引，中文）。
 
 ---
 
@@ -94,7 +94,7 @@ rag-engine/
 │   ├── api/           # 依赖、错误映射；api_v1 汇总路由
 │   └── main.py
 ├── frontend/
-├── docs/              # 架构说明、业务流程索引；README / README.en 双语导航
+├── docs/              # 架构说明、业务流程索引（中文为主）
 └── docker-compose.infra.yml
 ```
 
