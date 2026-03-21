@@ -27,6 +27,8 @@ from app.services.embedding.embedding_factory import EmbeddingsFactory
 from app.services.llm.llm_factory import LLMFactory
 from app.services.vector_store import VectorStoreFactory
 from app.services.rag_dedupe import dedupe_retrieved_documents
+from app.services.ai_runtime_loader import AiRuntimeNotConfigured
+from app.services.ai_runtime_scope import ai_runtime_scope
 
 # RAGAS collections + 本模块严格指标
 _RAGAS_AVAILABLE = False
@@ -167,9 +169,6 @@ def run_evaluation_task(task_id: int) -> None:
         if task.status == "running":
             return
 
-        task.status = "running"  # type: ignore
-        db.commit()
-
         test_cases = (
             db.query(EvaluationTestCase)
             .filter(EvaluationTestCase.task_id == task_id)
@@ -183,140 +182,35 @@ def run_evaluation_task(task_id: int) -> None:
             db.commit()
             return
 
-        # 2. 加载向量存储和 LLM（如需知识库）
-        vector_store = None
-        if task.knowledge_base_id:
-            kb = (
+        uid: Optional[int] = task.created_by  # type: ignore[assignment]
+        if not uid and task.knowledge_base_id:
+            kb_u = (
                 db.query(KnowledgeBase)
                 .filter(KnowledgeBase.id == task.knowledge_base_id)
                 .first()
             )
-            if kb:
-                docs = (
-                    db.query(Document)
-                    .filter(Document.knowledge_base_id == task.knowledge_base_id)
-                    .all()
-                )
-                if docs:
-                    embeddings = EmbeddingsFactory.create()
-                    vector_store = VectorStoreFactory.create(
-                        store_type=settings.VECTOR_STORE_TYPE,
-                        collection_name=f"kb_{task.knowledge_base_id}",
-                        embedding_function=embeddings,
-                    )
+            if kb_u:
+                uid = kb_u.user_id
 
-        # 用于生成的 LLM（非流式，temperature=0）
-        llm = LLMFactory.create(temperature=0, streaming=False)
-
-        if not _RAGAS_AVAILABLE:
-            logging.warning(
-                "RAGAS 未安装，评估将执行检索和生成，但无法计算评分。"
-                "请执行: pip install ragas datasets"
-            )
-
-        top_k = task.top_k or 5
-        eval_type = (task.evaluation_type or "full").lower()
-        needs_retrieval = EVALUATION_TYPE_NEEDS_RETRIEVAL.get(eval_type, True)
-        needs_generation = EVALUATION_TYPE_NEEDS_GENERATION.get(eval_type, True)
-        raw_em = getattr(task, "evaluation_metrics", None)
-        metrics_for_type = resolve_metrics(eval_type, raw_em)
-
-        start_time = time.time()
-        total_passed = 0
-        score_lists: Dict[str, List[float]] = {k: [] for k in SCORE_KEYS}
-
-        # 3. 对每个测试用例：检索 → 生成（按需）→ 评估 → 保存
-        for tc in test_cases:
-            # 3a. 检索
-            retrieved_contexts: List[str] = []
-            if vector_store and needs_retrieval:
-                retrieved_contexts = _retrieve(tc.query, vector_store, top_k)
-
-            # 3b. 生成（retrieval 类型跳过）
-            generated_answer: Optional[str] = None
-            if needs_generation:
-                generated_answer = _generate_answer(tc.query, retrieved_contexts, llm)
-            else:
-                generated_answer = ""
-
-            # 3c. 评估（按类型只计算对应指标）
-            scores = _evaluate_with_ragas(
-                question=tc.query,
-                contexts=retrieved_contexts,
-                answer=generated_answer or "",
-                ground_truth=tc.reference or "",
-                metrics_to_use=metrics_for_type,
-            )
-
-            passed = _is_passed(scores, metrics_for_type)
-            total_passed += passed
-
-            for k in SCORE_KEYS:
-                v = scores.get(k)
-                if v is not None:
-                    try:
-                        score_lists[k].append(float(v))
-                    except (TypeError, ValueError):
-                        pass
-
-            # 3d. 保存结果（仅持久化列上存在的指标；answer_correctness 等在 judge_details）
-            def _mask_score(name: str) -> Optional[float]:
-                return scores.get(name) if name in metrics_for_type else None
-
-            _three_core = (
-                "context_relevance" in metrics_for_type
-                and "faithfulness" in metrics_for_type
-                and "answer_relevance" in metrics_for_type
-            )
-            result = EvaluationResult(
-                task_id=task_id,
-                test_case_id=tc.id,
-                retrieved_contexts=retrieved_contexts,
-                generated_answer=generated_answer,
-                context_relevance=_mask_score("context_relevance"),
-                faithfulness=_mask_score("faithfulness"),
-                answer_relevance=_mask_score("answer_relevance"),
-                context_recall=_mask_score("context_recall"),
-                context_precision=_mask_score("context_precision"),
-                ragas_score=(
-                    scores.get("ragas_score") if _three_core else None
-                ),
-                passed=passed,
-                judge_details={
-                    k: v
-                    for k, v in scores.items()
-                    if k
-                    in set(metrics_for_type)
-                    | {"ragas_score", "error", "skipped", "answer_correctness"}
-                },
-            )
-            db.add(result)
+        if not uid:
+            task.status = "failed"  # type: ignore
+            task.error_message = "无法确定所属用户，无法加载模型配置"  # type: ignore
             db.commit()
+            return
 
-        # 4. 汇总统计
-        duration = time.time() - start_time
-        n = len(test_cases)
-        pass_rate = total_passed / n if n else 0
-
-        base_summary: dict = {
-            "total": n,
-            "passed": total_passed,
-            "failed": n - total_passed,
-            "pass_rate": round(pass_rate, 4),
-            "duration_seconds": round(duration, 2),
-            "evaluation_type": eval_type,
-            "metrics": metrics_for_type,
-        }
-        if not _RAGAS_AVAILABLE:
-            base_summary["warning"] = "RAGAS 未安装，无法计算评分。请执行: pip install ragas datasets"
-        for k, label in AVG_SUMMARY_KEYS.items():
-            vals = score_lists[k]
-            if vals:
-                base_summary[label] = round(sum(vals) / len(vals), 4)
-
-        task.summary = base_summary  # type: ignore
-        task.status = "completed"  # type: ignore
+        task.status = "running"  # type: ignore
         db.commit()
+
+        try:
+            with ai_runtime_scope(db, uid):
+                _run_evaluation_body(db, task_id, task, test_cases)
+        except AiRuntimeNotConfigured as e:
+            task = db.query(EvaluationTask).filter(EvaluationTask.id == task_id).first()
+            if task:
+                task.status = "failed"  # type: ignore
+                task.error_message = e.detail  # type: ignore
+                db.commit()
+            return
 
     except Exception as e:
         task = db.query(EvaluationTask).filter(EvaluationTask.id == task_id).first()
@@ -327,3 +221,145 @@ def run_evaluation_task(task_id: int) -> None:
         raise
     finally:
         db.close()
+
+
+def _run_evaluation_body(
+    db: Session,
+    task_id: int,
+    task: EvaluationTask,
+    test_cases: List[EvaluationTestCase],
+) -> None:
+    # 2. 加载向量存储和 LLM（如需知识库）
+    vector_store = None
+    if task.knowledge_base_id:
+        kb = (
+            db.query(KnowledgeBase)
+            .filter(KnowledgeBase.id == task.knowledge_base_id)
+            .first()
+        )
+        if kb:
+            docs = (
+                db.query(Document)
+                .filter(Document.knowledge_base_id == task.knowledge_base_id)
+                .all()
+            )
+            if docs:
+                embeddings = EmbeddingsFactory.create()
+                vector_store = VectorStoreFactory.create(
+                    store_type=settings.VECTOR_STORE_TYPE,
+                    collection_name=f"kb_{task.knowledge_base_id}",
+                    embedding_function=embeddings,
+                )
+
+    # 用于生成的 LLM（非流式，temperature=0）
+    llm = LLMFactory.create(temperature=0, streaming=False)
+
+    if not _RAGAS_AVAILABLE:
+        logging.warning(
+            "RAGAS 未安装，评估将执行检索和生成，但无法计算评分。"
+            "请执行: pip install ragas datasets"
+        )
+
+    top_k = task.top_k or 5
+    eval_type = (task.evaluation_type or "full").lower()
+    needs_retrieval = EVALUATION_TYPE_NEEDS_RETRIEVAL.get(eval_type, True)
+    needs_generation = EVALUATION_TYPE_NEEDS_GENERATION.get(eval_type, True)
+    raw_em = getattr(task, "evaluation_metrics", None)
+    metrics_for_type = resolve_metrics(eval_type, raw_em)
+
+    start_time = time.time()
+    total_passed = 0
+    score_lists: Dict[str, List[float]] = {k: [] for k in SCORE_KEYS}
+
+    # 3. 对每个测试用例：检索 → 生成（按需）→ 评估 → 保存
+    for tc in test_cases:
+        # 3a. 检索
+        retrieved_contexts: List[str] = []
+        if vector_store and needs_retrieval:
+            retrieved_contexts = _retrieve(tc.query, vector_store, top_k)
+
+        # 3b. 生成（retrieval 类型跳过）
+        generated_answer: Optional[str] = None
+        if needs_generation:
+            generated_answer = _generate_answer(tc.query, retrieved_contexts, llm)
+        else:
+            generated_answer = ""
+
+        # 3c. 评估（按类型只计算对应指标）
+        scores = _evaluate_with_ragas(
+            question=tc.query,
+            contexts=retrieved_contexts,
+            answer=generated_answer or "",
+            ground_truth=tc.reference or "",
+            metrics_to_use=metrics_for_type,
+        )
+
+        passed = _is_passed(scores, metrics_for_type)
+        total_passed += passed
+
+        for k in SCORE_KEYS:
+            v = scores.get(k)
+            if v is not None:
+                try:
+                    score_lists[k].append(float(v))
+                except (TypeError, ValueError):
+                    pass
+
+        # 3d. 保存结果（仅持久化列上存在的指标；answer_correctness 等在 judge_details）
+        def _mask_score(name: str) -> Optional[float]:
+            return scores.get(name) if name in metrics_for_type else None
+
+        _three_core = (
+            "context_relevance" in metrics_for_type
+            and "faithfulness" in metrics_for_type
+            and "answer_relevance" in metrics_for_type
+        )
+        result = EvaluationResult(
+            task_id=task_id,
+            test_case_id=tc.id,
+            retrieved_contexts=retrieved_contexts,
+            generated_answer=generated_answer,
+            context_relevance=_mask_score("context_relevance"),
+            faithfulness=_mask_score("faithfulness"),
+            answer_relevance=_mask_score("answer_relevance"),
+            context_recall=_mask_score("context_recall"),
+            context_precision=_mask_score("context_precision"),
+            ragas_score=(
+                scores.get("ragas_score") if _three_core else None
+            ),
+            passed=passed,
+            judge_details={
+                k: v
+                for k, v in scores.items()
+                if k
+                in set(metrics_for_type)
+                | {"ragas_score", "error", "skipped", "answer_correctness"}
+            },
+        )
+        db.add(result)
+        db.commit()
+
+    # 4. 汇总统计
+    duration = time.time() - start_time
+    n = len(test_cases)
+    pass_rate = total_passed / n if n else 0
+
+    base_summary: dict = {
+        "total": n,
+        "passed": total_passed,
+        "failed": n - total_passed,
+        "pass_rate": round(pass_rate, 4),
+        "duration_seconds": round(duration, 2),
+        "evaluation_type": eval_type,
+        "metrics": metrics_for_type,
+    }
+    if not _RAGAS_AVAILABLE:
+        base_summary["warning"] = "RAGAS 未安装，无法计算评分。请执行: pip install ragas datasets"
+    for k, label in AVG_SUMMARY_KEYS.items():
+        vals = score_lists[k]
+        if vals:
+            base_summary[label] = round(sum(vals) / len(vals), 4)
+
+    task.summary = base_summary  # type: ignore
+    task.status = "completed"  # type: ignore
+    db.commit()

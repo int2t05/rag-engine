@@ -7,6 +7,7 @@ import {
   BookIcon,
   ChartBarIcon,
   ChatIcon,
+  CpuChipIcon,
   HomeIcon,
   KeyIcon,
   LogoutIcon,
@@ -20,6 +21,7 @@ const DASHBOARD_NAV = [
   { href: PATH.knowledgeBase, label: "知识库", icon: BookIcon },
   { href: PATH.chat, label: "对话", icon: ChatIcon },
   { href: PATH.evaluation, label: "RAG 评估", icon: ChartBarIcon },
+  { href: PATH.modelConfig, label: "模型配置", icon: CpuChipIcon },
   { href: PATH.apiKeys, label: "API 密钥", icon: KeyIcon },
 ] as const;
 

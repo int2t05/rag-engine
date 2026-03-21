@@ -9,8 +9,9 @@ RAG Web UI 后端应用入口
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 
 from app.api.api_v1.api import api_router
 from app.api.openapi.api import router as openapi_router
@@ -38,7 +39,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # JWT 走 Authorization 头，无需 cookie；与 allow_origins=["*"] 同时开 credentials 易触发浏览器/中间件异常
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -65,8 +67,14 @@ async def startup_event():
 
 
 @app.get("/")
-def root():
-    """根路径健康检查，返回欢迎消息"""
+def root(request: Request):
+    """
+    根路径：浏览器地址栏打开时重定向到 Swagger（/docs），避免只看到 JSON 误以为「一直加载」；
+    curl / 脚本（Accept 不含 text/html 或显式要 JSON）仍返回 JSON。
+    """
+    accept = request.headers.get("accept") or ""
+    if "text/html" in accept and "application/json" not in accept:
+        return RedirectResponse(url="/docs", status_code=307)
     return {"message": "Welcome to RAG Web UI API"}
 
 

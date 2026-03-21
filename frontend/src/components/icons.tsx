@@ -168,3 +168,21 @@ export function DocumentIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+/** 模型 / 算力芯片图标 */
+export function CpuChipIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m9-10.5h-1.5m-15 0H3m9-6.75v-1.5m0 15v-1.5"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M6.75 7.5h10.5v9H6.75v-9Z"
+      />
+    </svg>
+  );
+}

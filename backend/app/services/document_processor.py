@@ -35,13 +35,16 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.minio import get_minio_client
-from app.models.knowledge import ProcessingTask, Document, DocumentChunk
+from app.models.knowledge import ProcessingTask, Document, DocumentChunk, KnowledgeBase
 from app.services.chunk_record import ChunkRecord
 from minio.error import MinioException
 from minio import Minio
 from minio.commonconfig import CopySource
 from app.services.vector_store import VectorStoreFactory
 from app.services.embedding.embedding_factory import EmbeddingsFactory
+from app.services.ai_runtime_loader import AiRuntimeNotConfigured, load_ai_runtime_for_user
+from app.services.ai_runtime_context import reset_ai_runtime_token, set_ai_runtime_token
+from app.services.ai_runtime_scope import ai_runtime_scope
 
 
 class UploadResult(BaseModel):
@@ -73,6 +76,7 @@ async def process_document(
     file_name: str,
     kb_id: int,
     document_id: int,
+    user_id: int,
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
 ) -> None:
@@ -87,6 +91,13 @@ async def process_document(
     """
     logger = logging.getLogger(__name__)
 
+    db = SessionLocal()
+    try:
+        rt = load_ai_runtime_for_user(db, user_id)
+    except AiRuntimeNotConfigured as e:
+        db.close()
+        raise RuntimeError(e.detail) from e
+    tok = set_ai_runtime_token(rt)
     try:
         preview_result = await preview_document(file_path, chunk_size, chunk_overlap)
 
@@ -174,6 +185,9 @@ async def process_document(
     except Exception as e:
         logger.error(f"处理错误的文件: {str(e)}")
         raise
+    finally:
+        reset_ai_runtime_token(tok)
+        db.close()
 
 
 async def upload_document(file: UploadFile, kb_id: int) -> UploadResult:
@@ -289,6 +303,7 @@ def _process_document_background_sync(
     db: Session = None,
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
+    user_id: Optional[int] = None,
 ) -> None:
     """
     后台文档处理主流程（同步实现，在线程池中运行）。
@@ -314,6 +329,11 @@ def _process_document_background_sync(
     if not task:
         logger.error(f"找不到任务{task_id}")
         return
+
+    uid = user_id
+    if uid is None:
+        kb_row = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+        uid = kb_row.user_id if kb_row else None
 
     try:
         logger.info(f"任务 {task_id}：设置状态为processing")
@@ -368,93 +388,104 @@ def _process_document_background_sync(
             chunks = text_splitter.split_documents(documents)
             logger.info(f"任务{task_id}：文档拆分为{len(chunks)}个块")
 
-            # 3. 创建向量存储
-            logger.info(f"任务 {task_id}：初始化vector store")
-            embeddings = EmbeddingsFactory.create()
+            if uid is None:
+                raise Exception("无法确定知识库所属用户，无法加载嵌入配置")
 
-            vector_store = VectorStoreFactory.create(
-                store_type=settings.VECTOR_STORE_TYPE,
-                collection_name=f"kb_{kb_id}",
-                embedding_function=embeddings,
-            )
-
-            # 4. 将临时文件移动到永久目录
-            permanent_path = f"kb_{kb_id}/{file_name}"
             try:
-                logger.info(f"任务{task_id}：将文件移动到永久存储")
-                # 复制到永久目录
-                source = CopySource(settings.MINIO_BUCKET_NAME, temp_path)
-                minio_client.copy_object(
-                    bucket_name=settings.MINIO_BUCKET_NAME,
-                    object_name=permanent_path,
-                    source=source,
+                rt = load_ai_runtime_for_user(db, uid)
+            except AiRuntimeNotConfigured as e:
+                raise Exception(e.detail) from e
+            tok = set_ai_runtime_token(rt)
+            try:
+                # 3. 创建向量存储
+                logger.info(f"任务 {task_id}：初始化vector store")
+                embeddings = EmbeddingsFactory.create()
+
+                vector_store = VectorStoreFactory.create(
+                    store_type=settings.VECTOR_STORE_TYPE,
+                    collection_name=f"kb_{kb_id}",
+                    embedding_function=embeddings,
                 )
-                logger.info(f"任务{task_id}：文件已移动到永久存储")
-                # MinIO 临时对象在处理链全部成功后再删除（见下方 commit 之后），
-                # 避免处理中途临时路径仍被依赖时与「清理」或重试逻辑冲突。
-            except MinioException as e:
-                error_msg = f"无法将文件移动到永久存储：{str(e)}"
-                logger.error(f"任务{task_id}：{error_msg}")
-                raise Exception(error_msg)
 
-            # 5. 创建文档记录
-            logger.info(f"任务{task_id}：创建文档记录")
-            document = Document(
-                file_name=file_name,
-                file_path=permanent_path,
-                file_hash=task.document_upload.file_hash,
-                file_size=task.document_upload.file_size,
-                content_type=task.document_upload.content_type,
-                knowledge_base_id=kb_id,
-            )
-            db.add(document)
-            db.commit()
-            db.refresh(document)
-            logger.info(f"任务{task_id}：使用ID {document.id}创建的文档记录")
+                # 4. 将临时文件移动到永久目录
+                permanent_path = f"kb_{kb_id}/{file_name}"
+                try:
+                    logger.info(f"任务{task_id}：将文件移动到永久存储")
+                    # 复制到永久目录
+                    source = CopySource(settings.MINIO_BUCKET_NAME, temp_path)
+                    minio_client.copy_object(
+                        bucket_name=settings.MINIO_BUCKET_NAME,
+                        object_name=permanent_path,
+                        source=source,
+                    )
+                    logger.info(f"任务{task_id}：文件已移动到永久存储")
+                    # MinIO 临时对象在处理链全部成功后再删除（见下方 commit 之后），
+                    # 避免处理中途临时路径仍被依赖时与「清理」或重试逻辑冲突。
+                except MinioException as e:
+                    error_msg = f"无法将文件移动到永久存储：{str(e)}"
+                    logger.error(f"任务{task_id}：{error_msg}")
+                    raise Exception(error_msg)
 
-            # 立即关联任务与文档（此前仅在 completed 时写入 document_id，导致
-            # Document.processing_tasks 在处理阶段为空，知识库详情无法展示「处理中」）
-            task.document_id = document.id  # type: ignore
-            db.commit()
-
-            # 6. 存储文档块
-            logger.info(f"任务 {task_id}：存储文档块")
-            vector_chunk_ids: List[str] = []
-            for i, chunk in enumerate(chunks):
-                # 为每个 chunk 生成唯一的 ID
-                chunk_id = hashlib.sha256(
-                    f"{kb_id}:{file_name}:{chunk.page_content}".encode()
-                ).hexdigest()
-                vector_chunk_ids.append(chunk_id)
-
-                chunk.metadata["source"] = file_name
-                chunk.metadata["kb_id"] = kb_id
-                chunk.metadata["document_id"] = document.id
-                chunk.metadata["chunk_id"] = chunk_id
-
-                doc_chunk = DocumentChunk(
-                    id=chunk_id,  # 添加 ID 字段
-                    document_id=document.id,
-                    kb_id=kb_id,
+                # 5. 创建文档记录
+                logger.info(f"任务{task_id}：创建文档记录")
+                document = Document(
                     file_name=file_name,
-                    chunk_metadata={
-                        "page_content": chunk.page_content,
-                        **chunk.metadata,
-                    },
-                    hash=hashlib.sha256(
-                        (chunk.page_content + str(chunk.metadata)).encode()
-                    ).hexdigest(),
+                    file_path=permanent_path,
+                    file_hash=task.document_upload.file_hash,
+                    file_size=task.document_upload.file_size,
+                    content_type=task.document_upload.content_type,
+                    knowledge_base_id=kb_id,
                 )
-                db.add(doc_chunk)
-                if i > 0 and i % 100 == 0:
-                    logger.info(f"任务 {task_id}：存储{i}块")
-                    db.commit()  # 每 100 条提交一次，避免事务太大
+                db.add(document)
+                db.commit()
+                db.refresh(document)
+                logger.info(f"任务{task_id}：使用ID {document.id}创建的文档记录")
 
-            # 7. 添加到向量存储（点 id 与 document_chunks.id 一致，删除文档时 _delete_document_core 才能删掉向量）
-            logger.info(f"任务{task_id}：将块添加到向量存储")
-            vector_store.add_documents(chunks, ids=vector_chunk_ids)
-            # 移除 persist() 调用，因为新版本不需要
-            logger.info(f"任务{task_id}：已将块添加到向量存储")
+                # 立即关联任务与文档（此前仅在 completed 时写入 document_id，导致
+                # Document.processing_tasks 在处理阶段为空，知识库详情无法展示「处理中」）
+                task.document_id = document.id  # type: ignore
+                db.commit()
+
+                # 6. 存储文档块
+                logger.info(f"任务 {task_id}：存储文档块")
+                vector_chunk_ids: List[str] = []
+                for i, chunk in enumerate(chunks):
+                    # 为每个 chunk 生成唯一的 ID
+                    chunk_id = hashlib.sha256(
+                        f"{kb_id}:{file_name}:{chunk.page_content}".encode()
+                    ).hexdigest()
+                    vector_chunk_ids.append(chunk_id)
+
+                    chunk.metadata["source"] = file_name
+                    chunk.metadata["kb_id"] = kb_id
+                    chunk.metadata["document_id"] = document.id
+                    chunk.metadata["chunk_id"] = chunk_id
+
+                    doc_chunk = DocumentChunk(
+                        id=chunk_id,  # 添加 ID 字段
+                        document_id=document.id,
+                        kb_id=kb_id,
+                        file_name=file_name,
+                        chunk_metadata={
+                            "page_content": chunk.page_content,
+                            **chunk.metadata,
+                        },
+                        hash=hashlib.sha256(
+                            (chunk.page_content + str(chunk.metadata)).encode()
+                        ).hexdigest(),
+                    )
+                    db.add(doc_chunk)
+                    if i > 0 and i % 100 == 0:
+                        logger.info(f"任务 {task_id}：存储{i}块")
+                        db.commit()  # 每 100 条提交一次，避免事务太大
+
+                # 7. 添加到向量存储（点 id 与 document_chunks.id 一致，删除文档时 _delete_document_core 才能删掉向量）
+                logger.info(f"任务{task_id}：将块添加到向量存储")
+                vector_store.add_documents(chunks, ids=vector_chunk_ids)
+                # 移除 persist() 调用，因为新版本不需要
+                logger.info(f"任务{task_id}：已将块添加到向量存储")
+            finally:
+                reset_ai_runtime_token(tok)
 
             # 8. 更新任务状态
             logger.info(f"任务{task_id}：正在将任务状态更新为completed")
@@ -520,6 +551,7 @@ async def process_document_background(
     db: Session = None,
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
+    user_id: Optional[int] = None,
 ) -> None:
     """在线程池中执行重 CPU/IO 的同步处理，避免阻塞 asyncio 事件循环。"""
     await asyncio.to_thread(
@@ -531,4 +563,5 @@ async def process_document_background(
         db,
         chunk_size,
         chunk_overlap,
+        user_id,
     )

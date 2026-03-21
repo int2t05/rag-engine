@@ -3,9 +3,8 @@ Embedding 工厂
 =============
 ``EMBEDDINGS_PROVIDER`` 仅两种：
 
-- ``openai`` —— ``OpenAIEmbeddings`` + ``OPENAI_EMBEDDINGS_*``；若嵌入与对话不同网关，设
-  ``OPENAI_EMBEDDINGS_API_BASE``（及可选 ``OPENAI_EMBEDDINGS_API_KEY``），否则沿用 ``OPENAI_API_*``
-- ``ollama`` —— ``OllamaEmbeddings``；若嵌入节点与对话不同，设 ``OLLAMA_EMBEDDINGS_API_BASE``，否则 ``OLLAMA_API_BASE``
+- ``openai`` —— ``OpenAIEmbeddings`` + 嵌入相关字段；配置来自数据库中的用户运行时配置（ContextVar）
+- ``ollama`` —— ``OllamaEmbeddings``
 
 别名：``open_ai`` → ``openai``。关闭 tiktoken 与 ``check_embedding_ctx_length`` 以减少网关兼容问题。
 """
@@ -18,7 +17,7 @@ from langchain_core.embeddings import Embeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_openai import OpenAIEmbeddings
 
-from app.core.config import settings
+from app.services.ai_runtime_context import get_ai_runtime
 
 
 def _openai_base(url: str) -> str:
@@ -43,18 +42,21 @@ def _canonical_provider(raw: str) -> str:
 
 
 def _openai_embeddings_base_url() -> str:
-    custom = (settings.OPENAI_EMBEDDINGS_API_BASE or "").strip()
-    return custom if custom else settings.OPENAI_API_BASE
+    s = get_ai_runtime()
+    custom = (s.openai_embeddings_api_base or "").strip()
+    return custom if custom else s.openai_api_base
 
 
 def _openai_embeddings_api_key() -> str:
-    custom = (settings.OPENAI_EMBEDDINGS_API_KEY or "").strip()
-    return custom if custom else settings.OPENAI_API_KEY
+    s = get_ai_runtime()
+    custom = (s.openai_embeddings_api_key or "").strip()
+    return custom if custom else s.openai_api_key
 
 
 def _ollama_embeddings_base_url() -> str:
-    custom = (settings.OLLAMA_EMBEDDINGS_API_BASE or "").strip()
-    return custom if custom else settings.OLLAMA_API_BASE
+    s = get_ai_runtime()
+    custom = (s.ollama_embeddings_api_base or "").strip()
+    return custom if custom else s.ollama_api_base
 
 
 def _openai_style_embeddings(*, api_key: str, base_url: str, model: str) -> Embeddings:
@@ -68,27 +70,28 @@ def _openai_style_embeddings(*, api_key: str, base_url: str, model: str) -> Embe
 
 
 class EmbeddingsFactory:
-    """按配置创建文本嵌入模型（向量检索 / 入库）。"""
+    """按当前请求/任务注入的运行时配置创建文本嵌入模型。"""
 
     @staticmethod
     def create() -> Embeddings:
-        provider = _canonical_provider(settings.EMBEDDINGS_PROVIDER)
+        s = get_ai_runtime()
+        provider = _canonical_provider(s.embeddings_provider)
 
         if provider not in _SUPPORTED:
             raise ValueError(
-                f"不支持的 EMBEDDINGS_PROVIDER={settings.EMBEDDINGS_PROVIDER!r} "
+                f"不支持的 embeddings_provider={s.embeddings_provider!r} "
                 f"（解析为 {provider!r}）。请使用 openai 或 ollama；"
-                "其它 OpenAI 兼容服务请设 openai 并配置 OPENAI_API_*。"
+                "其它 OpenAI 兼容服务请设 openai 并配置网关与密钥。"
             )
 
         if provider == "openai":
             return _openai_style_embeddings(
                 api_key=_openai_embeddings_api_key(),
                 base_url=_openai_embeddings_base_url(),
-                model=settings.OPENAI_EMBEDDINGS_MODEL,
+                model=s.openai_embeddings_model,
             )
 
         return OllamaEmbeddings(
-            model=settings.OLLAMA_EMBEDDINGS_MODEL,
+            model=s.ollama_embeddings_model,
             base_url=_ollama_host(_ollama_embeddings_base_url()),
         )

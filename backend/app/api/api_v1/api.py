@@ -13,7 +13,7 @@ API v1 路由汇总
 
 from fastapi import APIRouter
 
-from app.api.api_v1 import auth, knowledge_base, chat, api_keys, evaluation
+from app.api.api_v1 import auth, knowledge_base, chat, api_keys, evaluation, llm_embedding_config
 
 api_router = APIRouter()
 
@@ -22,3 +22,8 @@ api_router.include_router(knowledge_base.router, prefix="/knowledge-base", tags=
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])
 api_router.include_router(evaluation.router, prefix="/evaluation", tags=["evaluation"])
+api_router.include_router(
+    llm_embedding_config.router,
+    prefix="/llm-configs",
+    tags=["llm-configs"],
+)

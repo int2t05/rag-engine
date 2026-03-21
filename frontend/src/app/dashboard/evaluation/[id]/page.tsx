@@ -40,6 +40,57 @@ function formatScore(v: number | null | undefined): string {
   return (Math.round(v * 1000) / 1000).toFixed(3);
 }
 
+/** 同一 taskId 并发合并为一次请求（React Strict Mode 会重复跑 effect） */
+const inflightTaskGet = new Map<number, Promise<EvaluationTask>>();
+function getEvaluationTaskDeduped(id: number): Promise<EvaluationTask> {
+  let p = inflightTaskGet.get(id);
+  if (p) return p;
+  p = evaluationApi
+    .resolve(id)
+    .then((res) => {
+      if (!res.ok || !res.task) {
+        throw new ApiError(404, "评估任务不存在");
+      }
+      return res.task;
+    })
+    .finally(() => {
+      inflightTaskGet.delete(id);
+    });
+  inflightTaskGet.set(id, p);
+  return p;
+}
+
+/** 已确认不存在的任务 id（内存，热更新会丢） */
+const knownMissingTaskIds = new Set<number>();
+
+const MISSING_STORAGE_KEY = "rag_eval_missing_task_ids";
+
+function readMissingIdsFromStorage(): Set<number> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = sessionStorage.getItem(MISSING_STORAGE_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as unknown;
+    return new Set(Array.isArray(arr) ? arr.map(Number).filter((n) => !Number.isNaN(n)) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function addMissingIdToStorage(id: number) {
+  if (typeof window === "undefined") return;
+  const s = readMissingIdsFromStorage();
+  s.add(id);
+  sessionStorage.setItem(MISSING_STORAGE_KEY, JSON.stringify(Array.from(s)));
+}
+
+function removeMissingIdFromStorage(id: number) {
+  if (typeof window === "undefined") return;
+  const s = readMissingIdsFromStorage();
+  s.delete(id);
+  sessionStorage.setItem(MISSING_STORAGE_KEY, JSON.stringify(Array.from(s)));
+}
+
 export default function EvaluationDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -82,10 +133,18 @@ export default function EvaluationDetailPage() {
 
   const fetchTask = useCallback(async () => {
     try {
-      const t = await evaluationApi.get(taskId);
+      const t = await getEvaluationTaskDeduped(taskId);
       setTask(t);
+      knownMissingTaskIds.delete(taskId);
+      removeMissingIdFromStorage(taskId);
       return t;
     } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        knownMissingTaskIds.add(taskId);
+        addMissingIdToStorage(taskId);
+        router.replace(PATH.evaluation);
+        return null;
+      }
       setError(err instanceof ApiError ? err.message : "获取任务失败");
       return null;
     }
@@ -100,20 +159,55 @@ export default function EvaluationDetailPage() {
     }
   }, [taskId]);
 
+  // 仅依赖 taskId：不要把 fetchTask/fetchResults/router 放进依赖，否则回调引用抖动会导致 effect 死循环、反复 GET
   useEffect(() => {
     if (isNaN(taskId)) {
       router.replace(PATH.evaluation);
       return;
     }
 
+    if (
+      knownMissingTaskIds.has(taskId) ||
+      readMissingIdsFromStorage().has(taskId)
+    ) {
+      setLoading(false);
+      router.replace(PATH.evaluation);
+      return;
+    }
+
+    let cancelled = false;
+
     (async () => {
       setLoading(true);
       setError("");
-      await fetchTask();
-      await fetchResults();
-      setLoading(false);
+      try {
+        const t = await getEvaluationTaskDeduped(taskId);
+        if (cancelled) return;
+        setTask(t);
+        knownMissingTaskIds.delete(taskId);
+        removeMissingIdFromStorage(taskId);
+        const r = await evaluationApi.getResults(taskId);
+        if (cancelled) return;
+        setResults(r);
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 404) {
+          knownMissingTaskIds.add(taskId);
+          addMissingIdToStorage(taskId);
+          router.replace(PATH.evaluation);
+          return;
+        }
+        setError(err instanceof ApiError ? err.message : "获取任务失败");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
-  }, [taskId, router, fetchTask, fetchResults]);
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 故意只随 taskId 拉取，避免无限请求
+  }, [taskId]);
 
   const handleRun = useCallback(async () => {
     setRunning(true);
@@ -123,7 +217,12 @@ export default function EvaluationDetailPage() {
       await evaluationApi.run(taskId);
       const poll = async () => {
         const t = await fetchTask();
-        if (t?.status === "completed" || t?.status === "failed") {
+        if (!t) {
+          // 404 或任务已删：停止轮询，否则会每 2 秒打一次 GET
+          setRunning(false);
+          return;
+        }
+        if (t.status === "completed" || t.status === "failed") {
           await fetchResults();
           setRunning(false);
           return;

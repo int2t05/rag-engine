@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from openai import AsyncOpenAI
 
-from app.core.config import settings
+from app.schemas.ai_runtime import AiRuntimeSettings
 from app.services.evaluation.evaluation_config import SCORE_KEYS
 
 from ragas.metrics.collections import (
@@ -124,7 +124,7 @@ class StrictAnswerCorrectness(AnswerCorrectness):
         self.correctness_classifier_prompt = _ACC()
 
 
-# ---------- 与 .env 对齐的 RAGAS LLM / Embeddings ----------
+# ---------- 与数据库运行时配置一致的 RAGAS LLM / Embeddings ----------
 
 def _base(url: str) -> str:
     b = (url or "").strip()
@@ -135,24 +135,24 @@ def _ollama_host(url: str) -> str:
     return (url or "").strip().rstrip("/")
 
 
-def build_ragas_llm() -> Any:
+def build_ragas_llm(ai: AiRuntimeSettings) -> Any:
     from ragas.llms.base import llm_factory
 
-    p = (settings.CHAT_PROVIDER or "openai").lower()
+    p = (ai.chat_provider or "openai").lower()
     if p == "openai":
-        c = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, base_url=_base(settings.OPENAI_API_BASE))
-        return llm_factory(settings.OPENAI_MODEL, client=c, max_tokens=4096)
+        c = AsyncOpenAI(api_key=ai.openai_api_key, base_url=_base(ai.openai_api_base))
+        return llm_factory(ai.openai_model, client=c, max_tokens=4096)
     if p == "ollama":
-        h = _ollama_host(settings.OLLAMA_API_BASE)
+        h = _ollama_host(ai.ollama_api_base)
         c = AsyncOpenAI(base_url=f"{h}/v1", api_key="ollama")
-        return llm_factory(settings.OLLAMA_MODEL, client=c, max_tokens=4096)
-    raise ValueError(f"RAGAS 评估需要 CHAT_PROVIDER 为 openai 或 ollama，当前为 {p!r}")
+        return llm_factory(ai.ollama_model, client=c, max_tokens=4096)
+    raise ValueError(f"RAGAS 评估需要 chat_provider 为 openai 或 ollama，当前为 {p!r}")
 
 
-def build_ragas_embeddings() -> Any:
+def build_ragas_embeddings(ai: AiRuntimeSettings) -> Any:
     from ragas.embeddings.base import embedding_factory
 
-    raw = (settings.EMBEDDINGS_PROVIDER or "openai").strip().lower().replace("-", "_")
+    raw = (ai.embeddings_provider or "openai").strip().lower().replace("-", "_")
     alias = {"open_ai": "openai"}.get(raw, raw)
 
     def _openai_emb(key: str, base: str, model: str) -> Any:
@@ -164,22 +164,22 @@ def build_ragas_embeddings() -> Any:
         )
 
     if alias == "openai":
-        emb_base = (settings.OPENAI_EMBEDDINGS_API_BASE or "").strip() or settings.OPENAI_API_BASE
-        emb_key = (settings.OPENAI_EMBEDDINGS_API_KEY or "").strip() or settings.OPENAI_API_KEY
-        return _openai_emb(emb_key, emb_base, settings.OPENAI_EMBEDDINGS_MODEL)
+        emb_base = (ai.openai_embeddings_api_base or "").strip() or ai.openai_api_base
+        emb_key = (ai.openai_embeddings_api_key or "").strip() or ai.openai_api_key
+        return _openai_emb(emb_key, emb_base, ai.openai_embeddings_model)
     if alias == "ollama":
         h = _ollama_host(
-            (settings.OLLAMA_EMBEDDINGS_API_BASE or "").strip() or settings.OLLAMA_API_BASE
+            (ai.ollama_embeddings_api_base or "").strip() or ai.ollama_api_base
         )
         return embedding_factory(
             "openai",
-            model=settings.OLLAMA_EMBEDDINGS_MODEL,
+            model=ai.ollama_embeddings_model,
             client=AsyncOpenAI(base_url=f"{h}/v1", api_key="ollama"),
             interface="modern",
         )
     raise ValueError(
-        f"不支持的 EMBEDDINGS_PROVIDER={settings.EMBEDDINGS_PROVIDER!r}（解析为 {alias!r}）；"
-        "仅支持 openai、ollama；嵌入与对话不同 URL 时设 OPENAI_EMBEDDINGS_API_BASE / OLLAMA_EMBEDDINGS_API_BASE"
+        f"不支持的 embeddings_provider={ai.embeddings_provider!r}（解析为 {alias!r}）；"
+        "仅支持 openai、ollama"
     )
 
 
@@ -191,8 +191,11 @@ def metrics_need_embeddings(names: List[str]) -> bool:
 
 
 def build_ragas_dependencies(need_emb: bool) -> Tuple[Any, Optional[Any]]:
-    llm = build_ragas_llm()
-    emb = build_ragas_embeddings() if need_emb else None
+    from app.services.ai_runtime_context import get_ai_runtime
+
+    ai = get_ai_runtime()
+    llm = build_ragas_llm(ai)
+    emb = build_ragas_embeddings(ai) if need_emb else None
     return llm, emb
 
 

@@ -10,8 +10,23 @@ import { parseFastApiErrorBody } from "./api-errors";
 /** API 基础地址，默认指向本地后端服务 */
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-/** 默认请求超时时间（毫秒） */
-const DEFAULT_TIMEOUT_MS = 30_000;
+/**
+ * 默认请求超时（毫秒）。
+ * RAG/LLM 相关接口冷启动或向量检索常超过 30s，故默认放宽；可在前端 .env 设置 NEXT_PUBLIC_API_TIMEOUT_MS 覆盖（5000–3600000）。
+ */
+function parseApiTimeoutMs(): number {
+  const raw =
+    typeof process.env.NEXT_PUBLIC_API_TIMEOUT_MS === "string"
+      ? process.env.NEXT_PUBLIC_API_TIMEOUT_MS.trim()
+      : "";
+  if (raw && /^\d+$/.test(raw)) {
+    const n = Number(raw);
+    if (n >= 5_000 && n <= 3_600_000) return n;
+  }
+  return 120_000;
+}
+
+const DEFAULT_TIMEOUT_MS = parseApiTimeoutMs();
 
 // ==================== 类型定义 ====================
 
@@ -262,6 +277,13 @@ export interface EvaluationTask {
   test_cases?: EvaluationTestCase[] | null;
 }
 
+/** GET /api/evaluation/resolve/{id}：无任务时仍 200，ok=false */
+export interface EvaluationResolveResponse {
+  ok: boolean;
+  task_id: number;
+  task?: EvaluationTask;
+}
+
 /**
  * RAG 评估结果（单个测试用例的指标）
  */
@@ -299,6 +321,36 @@ export interface EvaluationTypeInfo {
  * API 密钥
  * @description 用于外部系统访问的密钥
  */
+/** 与后端 AiRuntimeSettings 对齐 */
+export interface AiRuntimeSettings {
+  embeddings_provider: string;
+  chat_provider: string;
+  openai_api_base: string;
+  openai_api_key: string;
+  openai_model: string;
+  openai_embeddings_model: string;
+  openai_embeddings_api_base: string;
+  openai_embeddings_api_key: string;
+  ollama_api_base: string;
+  ollama_embeddings_api_base: string;
+  ollama_model: string;
+  ollama_embeddings_model: string;
+}
+
+export interface LlmEmbeddingConfigItem {
+  id: number;
+  name: string;
+  config: AiRuntimeSettings;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LlmEmbeddingConfigListResponse {
+  items: LlmEmbeddingConfigItem[];
+  active_id: number | null;
+}
+
 export interface ApiKey {
   /** 密钥唯一标识 */
   id: number;
@@ -361,11 +413,19 @@ export class ApiError extends Error {
  * @example
  * const data = await fetchApi<User[]>('/api/users');
  */
+/** fetchApi 扩展选项（timeoutMs / data 不会传给原生 fetch） */
+export type FetchApiOptions = RequestInit & {
+  data?: unknown;
+  /** 单次请求超时毫秒数；不传则用环境或默认 120s */
+  timeoutMs?: number;
+};
+
 export async function fetchApi<T = unknown>(
   url: string,
-  options: RequestInit & { data?: unknown } = {},
+  options: FetchApiOptions = {},
 ): Promise<T> {
-  const { data, ...rest } = options;
+  const { data, timeoutMs, ...rest } = options;
+  const effectiveTimeoutMs = timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   // 从 localStorage 获取认证令牌
   const token =
@@ -385,11 +445,11 @@ export async function fetchApi<T = unknown>(
     headers["Content-Type"] = "application/json";
   }
 
-  // 请求超时（默认 30 秒，流式请求由调用方自行控制）
+  // 请求超时（流式对话 sendMessage 使用独立 fetch，不受此限制）
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const controller = rest.signal ? undefined : new AbortController();
   if (controller) {
-    timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    timeoutId = setTimeout(() => controller.abort(), effectiveTimeoutMs);
   }
 
   try {
@@ -442,35 +502,35 @@ export const api = {
   /**
    * GET 请求
    * @param url - 请求路径
-   * @param opts - 其他 RequestInit 选项
+   * @param opts - 其他 RequestInit 选项（可含 timeoutMs）
    */
-  get: <T = unknown>(url: string, opts?: Omit<RequestInit, "method">) =>
+  get: <T = unknown>(url: string, opts?: Omit<FetchApiOptions, "method">) =>
     fetchApi<T>(url, { ...opts, method: "GET" }),
 
   /**
    * POST 请求
    * @param url - 请求路径
    * @param data - 请求体数据
-   * @param opts - 其他 RequestInit 选项
+   * @param opts - 其他 RequestInit 选项（可含 timeoutMs）
    */
-  post: <T = unknown>(url: string, data?: unknown, opts?: Omit<RequestInit, "method">) =>
+  post: <T = unknown>(url: string, data?: unknown, opts?: Omit<FetchApiOptions, "method">) =>
     fetchApi<T>(url, { ...opts, method: "POST", data }),
 
   /**
    * PUT 请求
    * @param url - 请求路径
    * @param data - 请求体数据
-   * @param opts - 其他 RequestInit 选项
+   * @param opts - 其他 RequestInit 选项（可含 timeoutMs）
    */
-  put: <T = unknown>(url: string, data?: unknown, opts?: Omit<RequestInit, "method">) =>
+  put: <T = unknown>(url: string, data?: unknown, opts?: Omit<FetchApiOptions, "method">) =>
     fetchApi<T>(url, { ...opts, method: "PUT", data }),
 
   /**
    * DELETE 请求
    * @param url - 请求路径
-   * @param opts - 其他 RequestInit 选项
+   * @param opts - 其他 RequestInit 选项（可含 timeoutMs）
    */
-  delete: <T = unknown>(url: string, opts?: Omit<RequestInit, "method">) =>
+  delete: <T = unknown>(url: string, opts?: Omit<FetchApiOptions, "method">) =>
     fetchApi<T>(url, { ...opts, method: "DELETE" }),
 };
 
@@ -828,6 +888,23 @@ export const apiKeyApi = {
     api.delete<ApiKey>(`/api/api-keys/${id}`),
 };
 
+// ==================== 模型配置（LLM / 嵌入）API ====================
+
+export const llmConfigApi = {
+  list: () => api.get<LlmEmbeddingConfigListResponse>("/api/llm-configs"),
+
+  create: (data: { name: string; config: AiRuntimeSettings }) =>
+    api.post<LlmEmbeddingConfigItem>("/api/llm-configs", data),
+
+  update: (id: number, data: { name?: string; config?: AiRuntimeSettings }) =>
+    api.put<LlmEmbeddingConfigItem>(`/api/llm-configs/${id}`, data),
+
+  activate: (id: number) =>
+    api.post<LlmEmbeddingConfigItem>(`/api/llm-configs/${id}/activate`),
+
+  delete: (id: number) => api.delete<void>(`/api/llm-configs/${id}`),
+};
+
 // ==================== RAG 评估 API ====================
 
 /**
@@ -839,6 +916,12 @@ export const evaluationApi = {
 
   list: (skip = 0, limit = 100) =>
     api.get<EvaluationTask[]>(`/api/evaluation?skip=${skip}&limit=${limit}`),
+
+  /**
+   * 详情/轮询优先用：无任务时 HTTP 200 + ok=false，不刷 404 日志。
+   */
+  resolve: (id: number) =>
+    api.get<EvaluationResolveResponse>(`/api/evaluation/resolve/${id}`),
 
   get: (id: number) =>
     api.get<EvaluationTask>(`/api/evaluation/${id}`),

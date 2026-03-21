@@ -9,10 +9,13 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.security import get_current_user
 from app.db.session import get_db
+from app.api.deps import require_active_ai_runtime
+from app.schemas.ai_runtime import AiRuntimeSettings
 from app.models.evaluation import (
     EvaluationResult,
     EvaluationTask,
@@ -25,12 +28,30 @@ from app.services.evaluation.evaluation_config import get_evaluation_types_confi
 from app.schemas.evaluation import (
     EvaluationTaskCreate,
     EvaluationTaskResponse,
+    EvaluationResolveResponse,
     EvaluationResultResponse,
     TestCaseBatchImport,
     TestCaseBatchImportResult,
 )
 
 router = APIRouter()
+
+
+def _evaluation_task_accessible(user_id: int):
+    """
+    当前用户可访问的评估任务条件：
+    - created_by 为当前用户；或
+    - 历史数据 created_by 为空且关联知识库属于当前用户（evaluation_tasks.created_by 曾可为 NULL）。
+    """
+    return or_(
+        EvaluationTask.created_by == user_id,
+        and_(
+            EvaluationTask.created_by.is_(None),
+            EvaluationTask.knowledge_base_id.isnot(None),
+            KnowledgeBase.id == EvaluationTask.knowledge_base_id,
+            KnowledgeBase.user_id == user_id,
+        ),
+    )
 
 
 @router.get("/types", response_model=List[dict])
@@ -50,6 +71,7 @@ def create_evaluation_task(
     db: Session = Depends(get_db),
     task_in: EvaluationTaskCreate,
     current_user: User = Depends(get_current_user),
+    _rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
 ) -> Any:
     """
     创建评估任务（含测试用例）。
@@ -104,7 +126,11 @@ def list_evaluation_tasks(
     """获取当前用户的评估任务列表"""
     tasks = (
         db.query(EvaluationTask)
-        .filter(EvaluationTask.created_by == current_user.id)
+        .outerjoin(
+            KnowledgeBase,
+            KnowledgeBase.id == EvaluationTask.knowledge_base_id,
+        )
+        .filter(_evaluation_task_accessible(current_user.id))
         .order_by(EvaluationTask.id.desc())
         .offset(skip)
         .limit(limit)
@@ -119,6 +145,7 @@ def import_evaluation_test_cases(
     body: TestCaseBatchImport,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
 ) -> Any:
     """
     向已有评估任务批量追加测试用例（JSON 与创建任务时 test_cases 字段结构相同）。
@@ -126,9 +153,13 @@ def import_evaluation_test_cases(
     """
     task = (
         db.query(EvaluationTask)
+        .outerjoin(
+            KnowledgeBase,
+            KnowledgeBase.id == EvaluationTask.knowledge_base_id,
+        )
         .filter(
             EvaluationTask.id == task_id,
-            EvaluationTask.created_by == current_user.id,
+            _evaluation_task_accessible(current_user.id),
         )
         .first()
     )
@@ -163,6 +194,47 @@ def import_evaluation_test_cases(
     )
 
 
+def _get_task_detail_for_user(
+    db: Session,
+    task_id: int,
+    user_id: int,
+) -> Optional[EvaluationTask]:
+    """详情用：含 test_cases joinedload。"""
+    return (
+        db.query(EvaluationTask)
+        .options(joinedload(EvaluationTask.test_cases))
+        .outerjoin(
+            KnowledgeBase,
+            KnowledgeBase.id == EvaluationTask.knowledge_base_id,
+        )
+        .filter(
+            EvaluationTask.id == task_id,
+            _evaluation_task_accessible(user_id),
+        )
+        .first()
+    )
+
+
+@router.get("/resolve/{task_id}", response_model=EvaluationResolveResponse)
+def resolve_evaluation_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    供前端详情/轮询使用：任务不存在时仍返回 HTTP 200（ok=false），避免访问日志反复出现 404。
+    存在时返回与 GET /evaluation/{task_id} 相同的任务结构。
+    """
+    task = _get_task_detail_for_user(db, task_id, current_user.id)
+    if not task:
+        return EvaluationResolveResponse(ok=False, task_id=task_id)
+    return EvaluationResolveResponse(
+        ok=True,
+        task_id=task_id,
+        task=EvaluationTaskResponse.model_validate(task),
+    )
+
+
 @router.get("/{task_id}", response_model=EvaluationTaskResponse)
 def get_evaluation_task(
     task_id: int,
@@ -170,15 +242,7 @@ def get_evaluation_task(
     current_user: User = Depends(get_current_user),
 ) -> Any:
     """获取单个评估任务详情（含测试用例）"""
-    task = (
-        db.query(EvaluationTask)
-        .options(joinedload(EvaluationTask.test_cases))
-        .filter(
-            EvaluationTask.id == task_id,
-            EvaluationTask.created_by == current_user.id,
-        )
-        .first()
-    )
+    task = _get_task_detail_for_user(db, task_id, current_user.id)
     if not task:
         raise HTTPException(status_code=404, detail="评估任务不存在")
     return task
@@ -197,9 +261,13 @@ def delete_evaluation_task(
     """删除评估任务（级联删除测试用例与结果）。执行中任务需传 force=true 强制删除。"""
     task = (
         db.query(EvaluationTask)
+        .outerjoin(
+            KnowledgeBase,
+            KnowledgeBase.id == EvaluationTask.knowledge_base_id,
+        )
         .filter(
             EvaluationTask.id == task_id,
-            EvaluationTask.created_by == current_user.id,
+            _evaluation_task_accessible(current_user.id),
         )
         .first()
     )
@@ -222,13 +290,18 @@ def run_evaluation(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
 ) -> Any:
     """触发评估任务后台执行"""
     task = (
         db.query(EvaluationTask)
+        .outerjoin(
+            KnowledgeBase,
+            KnowledgeBase.id == EvaluationTask.knowledge_base_id,
+        )
         .filter(
             EvaluationTask.id == task_id,
-            EvaluationTask.created_by == current_user.id,
+            _evaluation_task_accessible(current_user.id),
         )
         .first()
     )
@@ -250,9 +323,13 @@ def get_evaluation_results(
     """获取评估任务详细结果"""
     task = (
         db.query(EvaluationTask)
+        .outerjoin(
+            KnowledgeBase,
+            KnowledgeBase.id == EvaluationTask.knowledge_base_id,
+        )
         .filter(
             EvaluationTask.id == task_id,
-            EvaluationTask.created_by == current_user.id,
+            _evaluation_task_accessible(current_user.id),
         )
         .first()
     )

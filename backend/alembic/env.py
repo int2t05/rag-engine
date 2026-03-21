@@ -10,6 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.models.base import Base
 from app.models.user import User
+from app.models.llm_embedding_config import LlmEmbeddingConfig  # noqa: F401
 from app.models.knowledge import KnowledgeBase, Document
 from app.models.chat import Chat, Message
 from app.core.config import settings

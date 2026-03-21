@@ -83,6 +83,17 @@ class EvaluationTaskResponse(BaseModel):
         from_attributes = True
 
 
+class EvaluationResolveResponse(BaseModel):
+    """
+    GET /evaluation/resolve/{id}：任务不存在时仍返回 HTTP 200（ok=false），避免访问日志刷 404。
+    存在时 ok=true 且带完整 task（与 GET /evaluation/{id} 一致）。
+    """
+
+    ok: bool
+    task_id: int
+    task: Optional[EvaluationTaskResponse] = None
+
+
 class EvaluationResultResponse(BaseModel):
     """单个评估结果响应"""
 

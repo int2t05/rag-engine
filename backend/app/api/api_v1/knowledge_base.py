@@ -36,6 +36,8 @@ from app.models.base import BEIJING_TZ
 from app.core.config import settings
 from app.core.minio import get_minio_client
 from app.core.security import get_current_user
+from app.api.deps import require_active_ai_runtime
+from app.schemas.ai_runtime import AiRuntimeSettings
 from app.models.user import User
 from app.db.session import get_db
 from app.models.knowledge import (
@@ -63,6 +65,8 @@ from app.services.document_processor import (
 from app.services.embedding.embedding_factory import EmbeddingsFactory
 from app.services.vector_store import VectorStoreFactory
 from app.services.rag_dedupe import dedupe_scored_pairs
+from app.services.ai_runtime_loader import AiRuntimeNotConfigured
+from app.services.ai_runtime_scope import ai_runtime_scope
 
 router = APIRouter()
 
@@ -119,17 +123,21 @@ def _delete_document_core(
         ]
 
         if chunk_ids:
-            embeddings = EmbeddingsFactory.create()
-            vector_store = VectorStoreFactory.create(
-                store_type=settings.VECTOR_STORE_TYPE,
-                collection_name=f"kb_{kb_id}",
-                embedding_function=embeddings,
-            )
             try:
-                vector_store.delete(chunk_ids)
-                logger.info(f"已从向量库删除文档 {doc_id} 的 {len(chunk_ids)} 个分块")
-            except Exception as e:
-                logger.warning(f"向量库删除分块失败（继续删除其他资源）: {e}")
+                with ai_runtime_scope(db, user_id):
+                    embeddings = EmbeddingsFactory.create()
+                    vector_store = VectorStoreFactory.create(
+                        store_type=settings.VECTOR_STORE_TYPE,
+                        collection_name=f"kb_{kb_id}",
+                        embedding_function=embeddings,
+                    )
+                    try:
+                        vector_store.delete(chunk_ids)
+                        logger.info(f"已从向量库删除文档 {doc_id} 的 {len(chunk_ids)} 个分块")
+                    except Exception as e:
+                        logger.warning(f"向量库删除分块失败（继续删除其他资源）: {e}")
+            except AiRuntimeNotConfigured as e:
+                logger.warning("未配置模型，跳过向量删除: %s", e.detail)
 
         minio_client = get_minio_client()
         try:
@@ -272,6 +280,7 @@ async def delete_knowledge_base(
     db: Session = Depends(get_db),
     kb_id: int,
     current_user: User = Depends(get_current_user),
+    _rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
 ) -> Any:
     """
     删除知识库以及关联的文档和索引
@@ -292,12 +301,13 @@ async def delete_knowledge_base(
 
         # 初始化服务
         minio_client = get_minio_client()
-        embeddings = EmbeddingsFactory.create()
-        vector_store = VectorStoreFactory.create(
-            store_type=settings.VECTOR_STORE_TYPE,
-            collection_name=f"kb_{kb_id}",
-            embedding_function=embeddings,
-        )
+        with ai_runtime_scope(db, current_user.id):
+            embeddings = EmbeddingsFactory.create()
+            vector_store = VectorStoreFactory.create(
+                store_type=settings.VECTOR_STORE_TYPE,
+                collection_name=f"kb_{kb_id}",
+                embedding_function=embeddings,
+            )
 
         # 首先清理外部资源
         cleanup_errors = []
@@ -358,6 +368,7 @@ async def upload_kb_documents(
     files: List[UploadFile],
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
 ):
     """
     将多个文档上传到MinIO。
@@ -501,6 +512,7 @@ async def process_kb_documents(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
 ):
     # BackgroundTasks 是 FastAPI 内置的一个工具类，用于在请求响应返回后，异步执行一些耗时的后台任务
     """
@@ -574,14 +586,16 @@ async def process_kb_documents(
                     }
                 )
 
-    background_tasks.add_task(add_processing_tasks_to_queue, task_data, kb_id)
+    background_tasks.add_task(
+        add_processing_tasks_to_queue, task_data, kb_id, current_user.id
+    )
 
     elapsed = round(time.time() - start_time, 2)
     logger.info(f"已提交 {len(task_info)} 个文档处理任务，耗时 {elapsed}s")
     return {"tasks": task_info}
 
 
-async def add_processing_tasks_to_queue(task_data, kb_id):
+async def add_processing_tasks_to_queue(task_data, kb_id, user_id: int):
     """
     在响应返回后并发执行各文档处理；内部通过 process_document_background
     的 to_thread 避免阻塞事件循环。
@@ -591,7 +605,12 @@ async def add_processing_tasks_to_queue(task_data, kb_id):
     results = await asyncio.gather(
         *[
             process_document_background(
-                data["temp_path"], data["file_name"], kb_id, data["task_id"], None
+                data["temp_path"],
+                data["file_name"],
+                kb_id,
+                data["task_id"],
+                None,
+                user_id=user_id,
             )
             for data in task_data
         ],
@@ -785,6 +804,7 @@ async def delete_document(
     kb_id: int,
     doc_id: int,
     current_user: User = Depends(get_current_user),
+    _rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
 ) -> Any:
     """
     删除文档：移除向量索引、MinIO 文件及数据库记录。
@@ -806,6 +826,7 @@ async def batch_delete_documents(
     body: BatchDeleteDocumentsRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
 ) -> Any:
     """
     批量删除文档；逐项执行，部分失败不影响其余项。
@@ -850,9 +871,9 @@ async def batch_delete_documents(
 @router.post("/test-retrieval")
 async def test_retrieval(
     request: TestRetrievalRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
 ) -> Any:
     """
     测试针对知识库的给定查询的检索质量。
@@ -873,32 +894,34 @@ async def test_retrieval(
                 detail=f"未找到知识库{request.kb_id}",
             )
 
-        # 初始化
-        embeddings = EmbeddingsFactory.create()
+        with ai_runtime_scope(db, current_user.id):
+            embeddings = EmbeddingsFactory.create()
 
-        vector_store = VectorStoreFactory.create(
-            store_type=settings.VECTOR_STORE_TYPE,
-            collection_name=f"kb_{request.kb_id}",
-            embedding_function=embeddings,
-        )
-
-        results = vector_store.similarity_search_with_score(
-            request.query, k=request.top_k
-        )
-        results = dedupe_scored_pairs(results)
-
-        response = []
-        for doc, score in results:
-            response.append(
-                {
-                    "content": doc.page_content,  # type: ignore
-                    "metadata": doc.metadata,  # type: ignore
-                    "score": float(score),  # 余弦距离 = 1 - 余弦相似度
-                }
+            vector_store = VectorStoreFactory.create(
+                store_type=settings.VECTOR_STORE_TYPE,
+                collection_name=f"kb_{request.kb_id}",
+                embedding_function=embeddings,
             )
 
-        return {"results": response}
+            results = vector_store.similarity_search_with_score(
+                request.query, k=request.top_k
+            )
+            results = dedupe_scored_pairs(results)
 
+            response = []
+            for doc, score in results:
+                response.append(
+                    {
+                        "content": doc.page_content,  # type: ignore
+                        "metadata": doc.metadata,  # type: ignore
+                        "score": float(score),  # 余弦距离 = 1 - 余弦相似度
+                    }
+                )
+
+            return {"results": response}
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"test-retrieval 错误: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

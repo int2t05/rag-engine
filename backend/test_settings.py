@@ -15,9 +15,8 @@ def test_env_import():
     # 1. 测试核心配置（MinIO + ChromaDB + OpenAI）
     print(f"1. MinIO Bucket 名称: {settings.MINIO_BUCKET_NAME}")
     print(f"2. ChromaDB 地址: {settings.CHROMA_DB_HOST}:{settings.CHROMA_DB_PORT}")
-    print(f"3. 嵌入提供商: {settings.EMBEDDINGS_PROVIDER}")
-    print(f"4. OpenAI API Key: {settings.OPENAI_API_KEY[:10]}..." if settings.OPENAI_API_KEY != "your-openai-api-key-here" else "4. OpenAI API Key: 使用默认值（未配置）")
-    print(f"5. MySQL 连接串: {settings.get_database_url}")
+    print("3. LLM/嵌入：已迁至数据库「模型配置」，不再从 .env 读取")
+    print(f"4. MySQL 连接串: {settings.get_database_url}")
     
     # 2. 验证 .env 文件是否加载
     env_file = Path(settings.model_config['env_file']) # type: ignore

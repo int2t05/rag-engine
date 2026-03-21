@@ -22,7 +22,10 @@ from app.schemas.chat import (
     MessageResponse,
 )
 from app.core.security import get_current_user
+from app.schemas.ai_runtime import AiRuntimeSettings
 from app.services.chat_service import generate_response
+from app.services.ai_runtime_context import reset_ai_runtime_token, set_ai_runtime_token
+from app.api.deps import require_active_ai_runtime
 
 router = APIRouter()
 
@@ -145,7 +148,8 @@ async def create_message(
     db: Session = Depends(get_db),
     chat_id: int,
     messages: dict,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
 ) -> StreamingResponse:
     """
     发送消息并获取 RAG 流式回答
@@ -169,16 +173,20 @@ async def create_message(
 
     knowledge_base_ids = [kb.id for kb in chat.knowledge_bases]
 
-    # 异步生成器
+    # rt 由 Depends(require_active_ai_runtime) 保证；set/reset 必须在流式生成器同一上下文中
     async def response_stream():
-        async for chunk in generate_response(
-            query=last_message["content"],
-            messages=messages,
-            knowledge_base_ids=knowledge_base_ids,
-            chat_id=chat_id,
-            db=db,
-        ):
-            yield chunk
+        tok = set_ai_runtime_token(rt)
+        try:
+            async for chunk in generate_response(
+                query=last_message["content"],
+                messages=messages,
+                knowledge_base_ids=knowledge_base_ids,
+                chat_id=chat_id,
+                db=db,
+            ):
+                yield chunk
+        finally:
+            reset_ai_runtime_token(tok)
 
     return StreamingResponse(
         response_stream(),

@@ -7,9 +7,13 @@
 每个用户可以拥有多个知识库、多个对话、多个 API 密钥。
 """
 
-from sqlalchemy import Boolean, Column, Integer, String
+from sqlalchemy import Boolean, Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
+
 from app.models.base import Base, TimestampMixin
+
+# 晚导入避免与 LlmEmbeddingConfig 循环依赖；仅用于 foreign_keys 注解
+from app.models.llm_embedding_config import LlmEmbeddingConfig
 
 
 class User(Base, TimestampMixin):
@@ -38,8 +42,22 @@ class User(Base, TimestampMixin):
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)
 
+    active_llm_embedding_config_id = Column(
+        Integer,
+        ForeignKey("llm_embedding_configs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     # ORM 关系映射
     # relationship 定义了 Python 对象间的关联，可以通过 user.knowledge_bases 直接访问
     knowledge_bases = relationship("KnowledgeBase", back_populates="user")
     chats = relationship("Chat", back_populates="user")
     api_keys = relationship("APIKey", back_populates="user", cascade="all, delete-orphan")
+    # 与 llm_embedding_configs 表有两条 FK（user_id 归属 + active_llm_embedding_config_id），
+    # 必须显式声明本关系走 user_id。
+    llm_embedding_configs = relationship(
+        LlmEmbeddingConfig,
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys=[LlmEmbeddingConfig.user_id],
+    )

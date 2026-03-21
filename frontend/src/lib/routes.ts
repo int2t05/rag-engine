@@ -19,6 +19,7 @@ export const PATH = {
   evaluationNew: "/dashboard/evaluation/new",
   evaluationDetail: (id: string | number) => `/dashboard/evaluation/${id}`,
   apiKeys: "/dashboard/api-keys",
+  modelConfig: "/dashboard/model-config",
 } as const;
 
 /** 主内容区全宽、无外边距（如对话全屏） */
@@ -32,6 +33,7 @@ const STATIC_CRUMB: Record<string, string> = {
   [PATH.evaluation]: "RAG 评估",
   [PATH.evaluationNew]: "新建评估",
   [PATH.apiKeys]: "API 密钥",
+  [PATH.modelConfig]: "模型配置",
 };
 
 export function breadcrumbsForPath(pathname: string): { label: string; href: string }[] {
