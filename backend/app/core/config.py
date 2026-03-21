@@ -64,9 +64,8 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = Field(default="minioadmin", alias="MINIO_SECRET_KEY")
     MINIO_BUCKET_NAME: str = Field(default="documents", alias="MINIO_BUCKET_NAME")
 
-    # ---------- Embedding（文本向量化）------------
-    # Embedding 提供商：openai / dashscope / ollama / zhipu
-    # Embedding 配置
+    # ---------- Embedding：openai | ollama（与入库、RAGAS 共用）----------
+    # 详见 docs/RAG评估业务流程最佳实践.md 第四节
     EMBEDDINGS_PROVIDER: str = Field(default="openai", alias="EMBEDDINGS_PROVIDER")
 
     # ---------- 向量数据库 ----------
@@ -77,7 +76,7 @@ class Settings(BaseSettings):
     QDRANT_URL: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
     QDRANT_PREFER_GRPC: bool = Field(default=True, alias="QDRANT_PREFER_GRPC")
 
-    # ---------- OpenAI ----------
+    # ---------- OpenAI 兼容 API（CHAT_PROVIDER=openai 与/或 EMBEDDINGS_PROVIDER=openai）----------
     OPENAI_API_BASE: str = Field(
         default="https://api.openai.com/v1", alias="OPENAI_API_BASE"
     )
@@ -88,36 +87,22 @@ class Settings(BaseSettings):
     OPENAI_EMBEDDINGS_MODEL: str = Field(
         default="text-embedding-ada-002", alias="OPENAI_EMBEDDINGS_MODEL"
     )
+    # 与对话不同网关时填写；空则嵌入走 OPENAI_API_BASE / OPENAI_API_KEY
+    OPENAI_EMBEDDINGS_API_BASE: str = Field(default="", alias="OPENAI_EMBEDDINGS_API_BASE")
+    OPENAI_EMBEDDINGS_API_KEY: str = Field(default="", alias="OPENAI_EMBEDDINGS_API_KEY")
 
-    # ---------- DeepSeek ----------
-    DEEPSEEK_API_KEY: str = Field(default="", alias="DEEPSEEK_API_KEY")
-    DEEPSEEK_API_BASE: str = Field(default="", alias="DEEPSEEK_API_BASE")
-    # Deepseek 模型可以是 deepseek-chat 或 deepseek-reasoner
-    DEEPSEEK_MODEL: str = Field(default="deepseek-chat", alias="DEEPSEEK_MODEL")
-
-    # ---------- 阿里 DashScope ----------
-    DASH_SCOPE_API_KEY: str = Field(default="", alias="DASH_SCOPE_API_KEY")
-    DASH_SCOPE_EMBEDDINGS_MODEL: str = Field(
-        default="", alias="DASH_SCOPE_EMBEDDINGS_MODEL"
-    )
-
-    # ---------- 智谱 GLM ----------
-    ZHIPUAI_API_KEY: str = Field(default="", alias="ZHIPUAI_API_KEY")
-    ZHIPUAI_EMBEDDINGS_MODEL: str = Field(
-        default="embedding-3", alias="ZHIPUAI_EMBEDDINGS_MODEL"
-    )
-    ZHIPUAI_MODEL: str = Field(default="glm-4.5", alias="ZHIPUAI_MODEL")
-
-    # ---------- Ollama 本地模型 ----------
+    # ---------- Ollama（CHAT_PROVIDER=ollama 和/或 EMBEDDINGS_PROVIDER=ollama）----------
     OLLAMA_API_BASE: str = Field(
         default="http://localhost:11434", alias="OLLAMA_API_BASE"
     )
+    # 嵌入服务不在同一 Ollama 节点时填写；空则走 OLLAMA_API_BASE
+    OLLAMA_EMBEDDINGS_API_BASE: str = Field(default="", alias="OLLAMA_EMBEDDINGS_API_BASE")
     OLLAMA_MODEL: str = Field(default="deepseek-r1:7b", alias="OLLAMA_MODEL")
     OLLAMA_EMBEDDINGS_MODEL: str = Field(
         default="nomic-embed-text", alias="OLLAMA_EMBEDDINGS_MODEL"
     )
 
-    # ---------- 聊天模型提供商 ----------
+    # 聊天与评估生成答案：openai | ollama（见 llm_factory）
     CHAT_PROVIDER: str = Field(default="openai", alias="CHAT_PROVIDER")
 
     # ---------- Pydantic V2 配置 ----------

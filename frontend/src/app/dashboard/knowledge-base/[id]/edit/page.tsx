@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { knowledgeBaseApi, ApiError } from "@/lib/api";
+import { PATH } from "@/lib/routes";
 import { ArrowLeftIcon } from "@/components/icons";
 
 export default function EditKnowledgeBasePage() {
@@ -68,7 +69,7 @@ export default function EditKnowledgeBasePage() {
         name: name.trim(),
         description: description.trim() || null,
       });
-      router.push(`/dashboard/knowledge-base/${id}`);
+      router.push(PATH.knowledgeBaseDetail(id));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "更新失败，请稍后重试");
     } finally {
@@ -91,7 +92,7 @@ export default function EditKnowledgeBasePage() {
       {/* 返回链接 */}
       <div className="mb-6">
         <Link
-          href={`/dashboard/knowledge-base/${id}`}
+          href={PATH.knowledgeBaseDetail(id)}
           className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1"
         >
           <ArrowLeftIcon className="w-4 h-4" />
@@ -114,7 +115,7 @@ export default function EditKnowledgeBasePage() {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="输入知识库名称"
+            placeholder="知识库显示名称（必填）"
             maxLength={255}
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
@@ -128,7 +129,7 @@ export default function EditKnowledgeBasePage() {
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="输入知识库描述（可选）"
+            placeholder="留空可清空描述；填写则保存为简介"
             rows={4}
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
           />
@@ -151,7 +152,7 @@ export default function EditKnowledgeBasePage() {
             {loading ? "保存中..." : "保存修改"}
           </button>
           <Link
-            href={`/dashboard/knowledge-base/${id}`}
+            href={PATH.knowledgeBaseDetail(id)}
             className="px-5 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
           >
             取消

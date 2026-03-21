@@ -3,6 +3,8 @@
  * @description 统一管理所有 API 请求，包括认证、超时、错误处理、数据转换等
  */
 
+import { parseFastApiErrorBody } from "./api-errors";
+
 // ==================== 配置常量 ====================
 
 /** API 基础地址，默认指向本地后端服务 */
@@ -64,6 +66,16 @@ export interface DocumentItem {
 }
 
 /**
+ * 尚未入库的队列任务（仅 document_id 仍为空时由详情接口返回）
+ */
+export interface PendingUploadTask {
+  task_id: number;
+  status: string;
+  file_name: string;
+  error_message: string | null;
+}
+
+/**
  * 知识库
  * @description RAG 系统的核心知识管理单元
  */
@@ -82,6 +94,8 @@ export interface KnowledgeBase {
   updated_at: string;
   /** 包含的文档列表 */
   documents: DocumentItem[];
+  /** 处理中且尚未关联 Document 的上传任务（刷新页面后仍可展示进度） */
+  pending_upload_tasks?: PendingUploadTask[];
 }
 
 /**
@@ -116,10 +130,10 @@ export interface TaskStatus {
   status: string;
   /** 错误信息 */
   error_message: string | null;
-  /** 上传记录 ID */
-  upload_id: number;
+  /** 上传记录 ID（完成后可能仍保留关联） */
+  upload_id: number | null;
   /** 文件名 */
-  file_name: string;
+  file_name: string | null;
 }
 
 /**
@@ -213,11 +227,20 @@ export interface Chat {
 }
 
 /**
- * RAG 评估测试用例（创建用）
+ * RAG 评估测试用例（创建任务时使用）
  */
 export interface EvaluationTestCaseCreate {
   query: string;
   reference?: string | null;
+}
+
+/**
+ * 评估测试用例（接口返回）
+ */
+export interface EvaluationTestCase {
+  id: number;
+  query: string;
+  reference: string | null;
 }
 
 /**
@@ -230,13 +253,17 @@ export interface EvaluationTask {
   knowledge_base_id: number | null;
   top_k: number;
   evaluation_type: string;
+  /** 自定义指标列表；未传则按 evaluation_type 使用后端默认 */
+  evaluation_metrics?: string[] | null;
   status: string;
   error_message: string | null;
   summary: Record<string, unknown> | null;
+  /** GET 任务详情时由后端 joinedload 返回 */
+  test_cases?: EvaluationTestCase[] | null;
 }
 
 /**
- * RAG 评估结果（单个测试用例）
+ * RAG 评估结果（单个测试用例的指标）
  */
 export interface EvaluationResult {
   id: number;
@@ -252,6 +279,20 @@ export interface EvaluationResult {
   ragas_score: number | null;
   passed: number | null;
   judge_details: Record<string, unknown> | null;
+}
+
+/**
+ * GET /api/evaluation/types 单项（与后端 get_evaluation_types_config 一致）
+ */
+export interface EvaluationTypeInfo {
+  type: string;
+  label: string;
+  description: string;
+  metrics: string[];
+  /** 可选指标全集（多选自定义时用） */
+  allowed_metrics?: string[];
+  needs_retrieval: boolean;
+  needs_generation: boolean;
 }
 
 /**
@@ -371,21 +412,7 @@ export async function fetchApi<T = unknown>(
     // 处理请求失败 - 解析错误响应
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      const detail = err.detail;
-      let message = "请求失败，请稍后重试";
-
-      if (typeof detail === "string") {
-        message = detail;
-      } else if (Array.isArray(detail) && detail.length > 0) {
-        // 处理验证错误数组（FastAPI Pydantic 格式）
-        message = detail
-          .map((e: { msg?: string }) => e.msg || "")
-          .filter(Boolean)
-          .join("; ") || message;
-      } else if (detail && typeof detail === "object" && "msg" in detail) {
-        message = (detail as { msg?: string }).msg || message;
-      }
-
+      const message = parseFastApiErrorBody(err, "请求失败，请稍后重试");
       throw new ApiError(res.status, message);
     }
 
@@ -582,8 +609,22 @@ export const knowledgeBaseApi = {
     ),
 
   /**
+   * 批量删除文档
+   */
+  batchDeleteDocuments: (
+    kbId: number,
+    documentIds: number[],
+  ) =>
+    api.post<{
+      deleted: number[];
+      failed: { doc_id: number; detail: string }[];
+    }>(`/api/knowledge-base/${kbId}/documents/batch-delete`, {
+      document_ids: documentIds,
+    }),
+
+  /**
    * 清理临时文件
-   * @description 清理超过 24 小时的过期临时上传文件
+   * @description 清理未在运行中的上传临时记录及 MinIO 临时对象（与后端 cleanup 一致）
    * @returns 清理结果消息
    */
   cleanup: () =>
@@ -703,6 +744,15 @@ export const chatApi = {
     api.delete<{ status: string }>(`/api/chat/${id}`),
 
   /**
+   * 批量删除对话
+   */
+  batchDelete: (chatIds: number[]) =>
+    api.post<{ deleted: number[]; not_found: number[] }>(
+      "/api/chat/batch-delete",
+      { chat_ids: chatIds },
+    ),
+
+  /**
    * 发送消息（流式响应）
    * @description 使用 Server-Sent Events (SSE) 返回流式响应
    * @param chatId - 对话 ID
@@ -718,7 +768,7 @@ export const chatApi = {
    *   console.log(decoder.decode(value));
    * }
    */
-  sendMessage: (chatId: number, messages: ChatMessage[]) => {
+  sendMessage: (chatId: number, messages: ChatMessage[], signal?: AbortSignal) => {
     const token =
       typeof window !== "undefined" ? localStorage.getItem("token") : "";
     return fetch(`${API_BASE}/api/chat/${chatId}/messages`, {
@@ -728,6 +778,7 @@ export const chatApi = {
         ...(token && { Authorization: `Bearer ${token}` }),
       },
       body: JSON.stringify({ messages }),
+      signal,
     });
   },
 };
@@ -780,61 +831,12 @@ export const apiKeyApi = {
 // ==================== RAG 评估 API ====================
 
 /**
- * 评估测试用例（创建用）
- */
-export interface EvaluationTestCaseCreate {
-  query: string;
-  reference?: string | null;
-}
-
-/**
- * 评估测试用例（响应）
- */
-export interface EvaluationTestCase {
-  id: number;
-  query: string;
-  reference: string | null;
-}
-
-/**
- * 评估任务
- */
-export interface EvaluationTask {
-  id: number;
-  name: string;
-  description: string | null;
-  knowledge_base_id: number | null;
-  top_k: number;
-  evaluation_type: string;
-  status: string;
-  error_message: string | null;
-  summary: Record<string, unknown> | null;
-  test_cases?: EvaluationTestCase[] | null;
-}
-
-/**
- * 评估结果（单条）
- */
-export interface EvaluationResult {
-  id: number;
-  task_id: number;
-  test_case_id: number | null;
-  retrieved_contexts: unknown[] | null;
-  generated_answer: string | null;
-  context_relevance: number | null;
-  faithfulness: number | null;
-  answer_relevance: number | null;
-  context_recall: number | null;
-  context_precision: number | null;
-  ragas_score: number | null;
-  passed: number | null;
-  judge_details: Record<string, unknown> | null;
-}
-
-/**
- * RAG 评估相关 API
+ * RAG 评估相关 API（与 backend app.api.api_v1.evaluation 对齐）
  */
 export const evaluationApi = {
+  /** 评估类型配置列表（标签、说明、指标），供创建任务时下拉展示 */
+  listTypes: () => api.get<EvaluationTypeInfo[]>("/api/evaluation/types"),
+
   list: (skip = 0, limit = 100) =>
     api.get<EvaluationTask[]>(`/api/evaluation?skip=${skip}&limit=${limit}`),
 
@@ -847,8 +849,10 @@ export const evaluationApi = {
     knowledge_base_id?: number | null;
     top_k?: number;
     evaluation_type?: string;
+    /** 指定后只计算这些指标；不传则按 evaluation_type 默认 */
+    evaluation_metrics?: string[];
     test_cases: EvaluationTestCaseCreate[];
-  }) => api.post<EvaluationTask>("/api/evaluation/", data),
+  }) => api.post<EvaluationTask>("/api/evaluation", data),
 
   run: (id: number) =>
     api.post<{ message: string; task_id: number }>(`/api/evaluation/${id}/run`),
@@ -858,4 +862,16 @@ export const evaluationApi = {
 
   delete: (id: number) =>
     api.delete<{ message: string; task_id: number }>(`/api/evaluation/${id}`),
+
+  /**
+   * 向已有任务批量追加测试用例（请求体与创建任务时的 test_cases 结构一致）
+   */
+  importTestCases: (
+    id: number,
+    data: { test_cases: EvaluationTestCaseCreate[] },
+  ) =>
+    api.post<{ task_id: number; imported: number; skipped: number }>(
+      `/api/evaluation/${id}/test-cases/import`,
+      data,
+    ),
 };

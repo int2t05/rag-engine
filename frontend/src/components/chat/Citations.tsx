@@ -37,11 +37,17 @@ export function Citations({ citations }: CitationsProps) {
                 {citation.page_content.length > 150 ? "..." : ""}
               </span>
             </div>
-            {citation.metadata?.source ? (
-              <div className="text-gray-400 mt-1 text-[10px]">
-                来源: {String(citation.metadata.source)}
-              </div>
-            ) : null}
+            {(() => {
+              const src =
+                citation.metadata?.source ??
+                citation.metadata?.file_name ??
+                citation.metadata?.filename;
+              return src ? (
+                <div className="text-gray-400 mt-1 text-[10px] truncate" title={String(src)}>
+                  来源: {String(src)}
+                </div>
+              ) : null;
+            })()}
           </div>
         ))}
       </div>

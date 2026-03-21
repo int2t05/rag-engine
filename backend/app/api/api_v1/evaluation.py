@@ -26,6 +26,8 @@ from app.schemas.evaluation import (
     EvaluationTaskCreate,
     EvaluationTaskResponse,
     EvaluationResultResponse,
+    TestCaseBatchImport,
+    TestCaseBatchImportResult,
 )
 
 router = APIRouter()
@@ -71,6 +73,7 @@ def create_evaluation_task(
         knowledge_base_id=task_in.knowledge_base_id,
         top_k=task_in.top_k,
         evaluation_type=task_in.evaluation_type,
+        evaluation_metrics=task_in.evaluation_metrics,
         status="pending",
         created_by=current_user.id,
     )
@@ -108,6 +111,56 @@ def list_evaluation_tasks(
         .all()
     )
     return tasks
+
+
+@router.post("/{task_id}/test-cases/import", response_model=TestCaseBatchImportResult)
+def import_evaluation_test_cases(
+    task_id: int,
+    body: TestCaseBatchImport,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    向已有评估任务批量追加测试用例（JSON 与创建任务时 test_cases 字段结构相同）。
+    执行中任务不可导入；问题为空的条目会跳过并计入 skipped。
+    """
+    task = (
+        db.query(EvaluationTask)
+        .filter(
+            EvaluationTask.id == task_id,
+            EvaluationTask.created_by == current_user.id,
+        )
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="评估任务不存在")
+    if task.status == "running":
+        raise HTTPException(status_code=400, detail="任务执行中，无法导入测试用例")
+
+    imported = 0
+    skipped = 0
+    for tc_in in body.test_cases:
+        q = (tc_in.query or "").strip()
+        if not q:
+            skipped += 1
+            continue
+        ref = tc_in.reference
+        if ref is not None:
+            ref = ref.strip() or None
+        tc = EvaluationTestCase(
+            task_id=task.id,
+            query=q,
+            reference=ref,
+            source="manual",
+        )
+        db.add(tc)
+        imported += 1
+    db.commit()
+    return TestCaseBatchImportResult(
+        task_id=task.id,
+        imported=imported,
+        skipped=skipped,
+    )
 
 
 @router.get("/{task_id}", response_model=EvaluationTaskResponse)

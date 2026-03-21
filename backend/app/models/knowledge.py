@@ -67,7 +67,11 @@ class Document(Base, TimestampMixin):
     knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), nullable=False)
 
     knowledge_base = relationship("KnowledgeBase", back_populates="documents")
-    processing_tasks = relationship("ProcessingTask", back_populates="document")
+    processing_tasks = relationship(
+        "ProcessingTask",
+        back_populates="document",
+        order_by="ProcessingTask.id",
+    )
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
 
     # 同一知识库内不允许重复文件名

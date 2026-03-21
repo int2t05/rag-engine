@@ -4,7 +4,7 @@
  */
 
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -14,6 +14,9 @@ import {
   EvaluationTestCase,
   ApiError,
 } from "@/lib/api";
+import { PATH } from "@/lib/routes";
+import { parseEvaluationQaJson } from "@/lib/evaluation-import";
+import { METRIC_LABELS } from "@/lib/evaluation-metrics";
 import { ArrowLeftIcon } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Toast } from "@/components/Toast";
@@ -55,6 +58,8 @@ export default function EvaluationDetailPage() {
     type: "success" as "success" | "error" | "info",
     show: false,
   });
+  const [importingJson, setImportingJson] = useState(false);
+  const detailJsonFileRef = useRef<HTMLInputElement>(null);
 
   const showToastMsg = useCallback(
     (msg: string, type: "success" | "error" | "info" = "error") => {
@@ -97,7 +102,7 @@ export default function EvaluationDetailPage() {
 
   useEffect(() => {
     if (isNaN(taskId)) {
-      router.replace("/dashboard/evaluation");
+      router.replace(PATH.evaluation);
       return;
     }
 
@@ -132,12 +137,41 @@ export default function EvaluationDetailPage() {
     }
   }, [taskId, fetchTask, fetchResults]);
 
+  const handleImportJsonFile = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      setImportingJson(true);
+      try {
+        const text = await file.text();
+        const parsed = parseEvaluationQaJson(text);
+        const res = await evaluationApi.importTestCases(taskId, {
+          test_cases: parsed,
+        });
+        await fetchTask();
+        showToastMsg(
+          `已导入 ${res.imported} 条${res.skipped ? `，跳过空问题 ${res.skipped} 条` : ""}`,
+          "success",
+        );
+      } catch (err) {
+        showToastMsg(
+          err instanceof ApiError ? err.message : String(err),
+          "error",
+        );
+      } finally {
+        setImportingJson(false);
+      }
+    },
+    [taskId, fetchTask, showToastMsg],
+  );
+
   const handleDelete = useCallback(async () => {
     setDeleting(true);
     try {
       await evaluationApi.delete(taskId);
       showToastMsg("评估任务已删除", "success");
-      setTimeout(() => router.replace("/dashboard/evaluation"), 400);
+      setTimeout(() => router.replace(PATH.evaluation), 400);
     } catch (err) {
       showToastMsg(err instanceof ApiError ? err.message : "删除失败", "error");
       setDeleting(false);
@@ -161,7 +195,7 @@ export default function EvaluationDetailPage() {
           </div>
         )}
         <Link
-          href="/dashboard/evaluation"
+          href={PATH.evaluation}
           className="text-sm text-blue-600 hover:underline"
         >
           返回列表
@@ -178,11 +212,18 @@ export default function EvaluationDetailPage() {
       ? (task.summary as Record<string, unknown>)
       : null;
 
+  const metricsFromRun =
+    metrics && Array.isArray(metrics["metrics"])
+      ? (metrics["metrics"] as string[])
+      : null;
+  const effectiveMetricIds =
+    task.evaluation_metrics?.length ? task.evaluation_metrics : metricsFromRun;
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-6">
         <Link
-          href="/dashboard/evaluation"
+          href={PATH.evaluation}
           className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1"
         >
           <ArrowLeftIcon className="w-4 h-4" />
@@ -237,7 +278,7 @@ export default function EvaluationDetailPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-xs text-gray-500">知识库</p>
           <p className="text-sm font-medium text-gray-800 mt-1">
@@ -263,6 +304,49 @@ export default function EvaluationDetailPage() {
           </div>
         )}
       </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+        <p className="text-xs text-gray-500 mb-2">选用指标</p>
+        {effectiveMetricIds?.length ? (
+          <div className="flex flex-wrap gap-2">
+            {effectiveMetricIds.map((id) => (
+              <span
+                key={id}
+                className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-800"
+              >
+                {METRIC_LABELS[id] ?? id}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-600">
+            未指定自定义指标，将按评估类型使用后端默认指标集；任务完成后摘要中会列出实际计算的指标。
+          </p>
+        )}
+      </div>
+
+      {task.status !== "running" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6 flex flex-wrap items-center gap-3">
+          <input
+            ref={detailJsonFileRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={handleImportJsonFile}
+          />
+          <button
+            type="button"
+            disabled={importingJson}
+            onClick={() => detailJsonFileRef.current?.click()}
+            className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50"
+          >
+            {importingJson ? "导入中…" : "从 JSON 批量追加用例"}
+          </button>
+          <span className="text-xs text-gray-500">
+            与新建评估页相同格式；执行中不可导入
+          </span>
+        </div>
+      )}
 
       {task.test_cases && task.test_cases.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
@@ -361,6 +445,17 @@ export default function EvaluationDetailPage() {
                         精度: {formatScore(r.context_precision)}
                       </span>
                     )}
+                    {r.judge_details &&
+                      typeof (r.judge_details as Record<string, unknown>)
+                        .answer_correctness === "number" && (
+                        <span className="text-gray-600">
+                          答案正确性:{" "}
+                          {formatScore(
+                            (r.judge_details as Record<string, unknown>)
+                              .answer_correctness as number,
+                          )}
+                        </span>
+                      )}
                   </div>
                   {(hasContexts || hasJudgeDetails) && (
                     <div className="mt-2 space-y-2">

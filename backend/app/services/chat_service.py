@@ -3,10 +3,16 @@ RAG 对话服务（核心）
 ===================
 实现完整的 RAG 流程：历史感知检索 → 上下文构建 → LLM 流式生成 → 引用格式化返回。
 
+LangChain 1.x 重构说明：
+- 旧版 create_history_aware_retriever / create_retrieval_chain / create_stuff_documents_chain
+  已在 langchain 1.x 中移除，全面改用 LCEL（LangChain Expression Language）
+- 历史感知检索：通过 LLM 重写问题 + retriever 实现
+- RAG 链：通过 { | prompt | llm } LCEL 管道构建
+
 流程概览：
 1. 保存用户消息和占位 AI 消息到数据库
 2. 为每个知识库创建向量存储，构建检索器
-3. 使用 LangChain 的 create_history_aware_retriever：根据对话历史重写问题
+3. 使用 LLM 根据对话历史重写问题（历史感知检索）
 4. 用重写后的问题检索相关文档片段
 5. 将检索结果作为上下文，构建 QA 提示词，要求 LLM 用 [citation:N] 引用
 6. 流式返回：先返回 Base64 编码的引用上下文，再逐块返回 LLM 回答
@@ -16,17 +22,14 @@ RAG 对话服务（核心）
 import json
 import logging
 import base64
-from typing import List, AsyncGenerator
+from typing import List, AsyncGenerator, Any
 from sqlalchemy.orm import Session
-from langchain.chains import create_history_aware_retriever, create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import (
     ChatPromptTemplate,
     MessagesPlaceholder,
-    PromptTemplate,
 )
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain.globals import set_verbose, set_debug
+from langchain_core.output_parsers import StrOutputParser
 
 from app.core.config import settings
 from app.models.chat import Message
@@ -34,12 +37,50 @@ from app.models.knowledge import KnowledgeBase, Document
 from app.services.vector_store import VectorStoreFactory
 from app.services.embedding.embedding_factory import EmbeddingsFactory
 from app.services.llm.llm_factory import LLMFactory
+from app.services.rag_dedupe import dedupe_retrieved_documents
 
 logger = logging.getLogger(__name__)
 
-# LangChain 调试模式：仅当 DEBUG=True 时开启，避免生产环境日志过多
-set_verbose(settings.DEBUG)
-set_debug(settings.DEBUG)
+
+def _format_docs(docs: List[Any]) -> str:
+    """将检索到的文档列表格式化为上下文字符串"""
+    return "\n\n".join(f"[citation:{i+1}]\n{doc.page_content}" for i, doc in enumerate(docs))
+
+
+def _serialize_context(context_docs: List[Any]) -> str:
+    """将上下文文档列表序列化为 Base64 编码的 JSON"""
+    serializable = [
+        {"page_content": doc.page_content, "metadata": dict(doc.metadata or {})}
+        for doc in context_docs
+    ]
+    # default=str：避免 metadata 中含 datetime 等无法 JSON 化的对象导致整段引用失败
+    return json.dumps({"context": serializable}, ensure_ascii=False, default=str)
+
+
+def _stream_chunk_to_text(chunk: Any) -> str:
+    """将 LCEL / 聊天模型流式块统一为纯文本（兼容 str 与带 content 的消息块）。"""
+    if chunk is None:
+        return ""
+    if isinstance(chunk, str):
+        return chunk
+    content = getattr(chunk, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                t = block.get("text")
+                if t is not None:
+                    parts.append(str(t))
+                else:
+                    parts.append(str(block))
+            else:
+                parts.append(str(block))
+        return "".join(parts)
+    return str(chunk)
 
 
 async def generate_response(
@@ -92,7 +133,7 @@ async def generate_response(
 
         if not vector_stores:
             error_msg = "我没有任何知识基础来帮助回答你的问题。"
-            yield f"data: {json.dumps({'text': error_msg})}\n"
+            yield f"data: {json.dumps({'text': error_msg}, ensure_ascii=False)}\n"
             yield "data: [DONE]\n"
             bot_message.content = error_msg  # type: ignore
             db.commit()
@@ -100,116 +141,113 @@ async def generate_response(
 
         # 3. 使用第一个知识库的检索器（可扩展为多库合并）
         retriever = vector_stores[0].as_retriever()
-
         llm = LLMFactory.create()
 
-        # 4. 历史感知问题重写：让 LLM 将对话中的指代（如"它"）转化为独立问题
-        contextualize_q_system_prompt = (
-            "Given a chat history and the latest user question "
-            "which might reference context in the chat history, "
-            "formulate a standalone question which can be understood "
-            "without the chat history. Do NOT answer the question, just "
-            "reformulate it if needed and otherwise return it as is."
-        )
+        # 4. 构建 LCEL 链替代已废弃的 create_history_aware_retriever
+        #    问题重写链：根据对话历史将问题改写为独立问题
         contextualize_q_prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", contextualize_q_system_prompt),
+                ("system",
+                 "Given a chat history and the latest user question "
+                 "which might reference context in the chat history, "
+                 "formulate a standalone question which can be understood "
+                 "without the chat history. Do NOT answer the question, just "
+                 "reformulate it if needed and otherwise return it as is."),
                 MessagesPlaceholder("chat_history"),
                 ("human", "{input}"),
             ]
         )
 
-        history_aware_retriever = create_history_aware_retriever(
-            llm, retriever, contextualize_q_prompt
+        # 历史感知问题重写链（LCEL）
+        history_aware_rewrite = (
+            contextualize_q_prompt
+            | llm
+            | StrOutputParser()
         )
 
-        # 5. QA 系统提示：要求引用上下文，使用 [citation:N] 格式
-        qa_system_prompt = (
-            "You are given a user question, and please write clean, concise and accurate answer to the question. "
-            "You will be given a set of related contexts to the question, which are numbered sequentially starting from 1. "
-            "Each context has an implicit reference number based on its position in the array (first context is 1, second is 2, etc.). "
-            "Please use these contexts and cite them using the format [citation:x] at the end of each sentence where applicable. "
-            "Your answer must be correct, accurate and written by an expert using an unbiased and professional tone. "
-            "Please limit to 1024 tokens. Do not give any information that is not related to the question, and do not repeat. "
-            "Say 'information is missing on' followed by the related topic, if the given context do not provide sufficient information. "
-            "If a sentence draws from multiple contexts, please list all applicable citations, like [citation:1][citation:2]. "
-            "Other than code and specific names and citations, your answer must be written in the same language as the question. "
-            "Be concise.\n\nContext: {context}\n\n"
-            "Remember: Cite contexts by their position number (1 for first context, 2 for second, etc.) and don't blindly "
-            "repeat the contexts verbatim."
-        )
+        # 5. QA 提示词（要求使用 [citation:N] 引用格式）
         qa_prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", qa_system_prompt),
+                ("system",
+                 "You are given a user question, and please write clean, concise and accurate answer to the question. "
+                 "You will be given a set of related contexts to the question, which are numbered sequentially starting from 1. "
+                 "Each context has an implicit reference number based on its position in the array (first context is 1, second is 2, etc.). "
+                 "Please use these contexts and cite them using the format [citation:x] at the end of each sentence where applicable. "
+                 "Your answer must be correct, accurate and written by an expert using an unbiased and professional tone. "
+                 "Please limit to 1024 tokens. Do not give any information that is not related to the question, and do not repeat. "
+                 "Say 'information is missing on' followed by the related topic, if the given context do not provide sufficient information. "
+                 "If a sentence draws from multiple contexts, please list all applicable citations, like [citation:1][citation:2]. "
+                 "Other than code and specific names and citations, your answer must be written in the same language as the question. "
+                 "Be concise.\n\n{context}\n\n"
+                 "Remember: Cite contexts by their position number (1 for first context, 2 for second, etc.) and don't blindly "
+                 "repeat the contexts verbatim."),
                 MessagesPlaceholder("chat_history"),
-                ("human", "{input}"),
+                ("human", "{question}"),
             ]
         )
 
-        document_prompt = PromptTemplate.from_template("\n\n- {page_content}\n\n")
+        # 6. 仅对「最终 QA」使用 LCEL；重写 + 检索不用嵌套 dict 并 astream
+        #    原因：LangChain 1.x 下 RunnableParallel（dict）在 astream 时会分片合并，
+        #    子步骤的 lambda 可能收到不完整输入，导致 x["question"] 等 KeyError。
+        #    显式 ainvoke 重写与检索，再对 qa_prompt|llm 做 astream，语义也更清晰。
+        answer_chain = qa_prompt | llm | StrOutputParser()
 
-        question_answer_chain = create_stuff_documents_chain(
-            llm,
-            qa_prompt,
-            document_variable_name="context",
-            document_prompt=document_prompt,
-        )
-
-        rag_chain = create_retrieval_chain(
-            history_aware_retriever,
-            question_answer_chain,
-        )
-
-        # 6. 构建 chat_history 供 LangChain 使用
+        # 7. 构建 chat_history 供 LangChain 使用
         chat_history = []
         for message in messages["messages"]:
             if message["role"] == "user":
                 chat_history.append(HumanMessage(content=message["content"]))
             elif message["role"] == "assistant":
                 if "__LLM_RESPONSE__" in message["content"]:
-                    message["content"] = message["content"].split("__LLM_RESPONSE__")[
-                        -1
-                    ]
+                    message["content"] = message["content"].split("__LLM_RESPONSE__")[-1]
                 chat_history.append(AIMessage(content=message["content"]))
 
-        full_response = ""
-        async for chunk in rag_chain.astream(  # 异步流式，逐步返回
+        # 8. 历史感知：仅用重写后的问句做检索；回答仍针对用户本轮原话 question=query
+        standalone_q = await history_aware_rewrite.ainvoke(
             {"input": query, "chat_history": chat_history}
+        )
+        retrieved_docs = await retriever.ainvoke(standalone_q)
+        retrieved_docs = dedupe_retrieved_documents(retrieved_docs)
+        logger.info(
+            "RAG 检索: knowledge_base_ids=%s 去重后片段数=%d",
+            knowledge_base_ids,
+            len(retrieved_docs),
+        )
+
+        full_response = ""
+        # 始终下发引用块（含空列表），便于前端展示「参考来源」并与首包仅含 Base64 时的状态更新一致
+        base64_context = base64.b64encode(
+            _serialize_context(retrieved_docs).encode()
+        ).decode()
+        separator = "__LLM_RESPONSE__"
+        yield f"data: {json.dumps({'text': base64_context + separator}, ensure_ascii=False)}\n"
+        full_response += base64_context + separator
+
+        # 9. 流式生成（只对 answer_chain astream，避免并行 dict 流式问题）
+        async for chunk in answer_chain.astream(
+            {
+                "context": _format_docs(retrieved_docs),
+                "question": query,
+                "chat_history": chat_history,
+            }
         ):
-            # 7a. 先流式返回引用上下文（Base64） 序列化
-            if "context" in chunk:
-                serializable_context = []
-                for context in chunk["context"]:  # document对象
-                    serializable_doc = {
-                        "page_content": context.page_content,
-                        "metadata": context.metadata,
-                    }
-                    serializable_context.append(serializable_doc)
+            piece = _stream_chunk_to_text(chunk)
+            if not piece:
+                continue
+            full_response += piece
+            yield f"data: {json.dumps({'text': piece}, ensure_ascii=False)}\n"
 
-                escaped_context = json.dumps({"context": serializable_context})
-                base64_context = base64.b64encode(escaped_context.encode()).decode()
-                separator = "__LLM_RESPONSE__"
-
-                yield f"data: {json.dumps({'text': base64_context + separator})}\n"
-                full_response += base64_context + separator
-
-            # 7b. 再流式返回 LLM 回答
-            if "answer" in chunk:
-                answer_chunk = chunk["answer"]
-                full_response += answer_chunk
-                yield f"data: {json.dumps({'text': answer_chunk})}\n"
-
-        # 8. 更新数据库中的 AI 消息
+        # 10. 更新数据库中的 AI 消息
         bot_message.content = full_response  # type: ignore
         db.commit()
 
     except Exception as e:
         error_message = f"错误生成响应：{str(e)}"
         logger.exception("RAG 响应生成失败")
-        yield f"data: {json.dumps({'text': error_message})}\n"
+        yield f"data: {json.dumps({'text': error_message}, ensure_ascii=False)}\n"
 
         db.commit()
-        if "bot_message" in locals():  # 返回一个字典，包含当前作用域的所有局部变量
+        if "bot_message" in locals():
             bot_message.content = error_message  # type: ignore
             db.commit()
     finally:

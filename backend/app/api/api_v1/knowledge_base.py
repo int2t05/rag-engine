@@ -12,7 +12,7 @@ import logging
 import time
 from datetime import datetime
 from io import BytesIO
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal
 
 from fastapi import (
     APIRouter,
@@ -25,8 +25,11 @@ from fastapi import (
 )
 from minio.error import MinioException
 from pydantic import BaseModel
-from sqlalchemy import func
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import delete, func
+from sqlalchemy.orm import Session, joinedload, selectinload
+
+from app.models.evaluation import EvaluationTask
+from app.models.chat import chat_knowledge_bases
 
 from app.core.config import settings
 from app.core.minio import get_minio_client
@@ -45,6 +48,7 @@ from app.schemas.knowledge import (
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
     DocumentResponse,
+    PendingUploadTaskResponse,
     PreviewRequest,
 )
 
@@ -56,6 +60,7 @@ from app.services.document_processor import (
 )
 from app.services.embedding.embedding_factory import EmbeddingsFactory
 from app.services.vector_store import VectorStoreFactory
+from app.services.rag_dedupe import dedupe_scored_pairs
 
 router = APIRouter()
 
@@ -68,6 +73,80 @@ class TestRetrievalRequest(BaseModel):
     query: str
     kb_id: int
     top_k: int
+
+
+class BatchDeleteDocumentsRequest(BaseModel):
+    """批量删除文档请求体"""
+
+    document_ids: List[int]
+
+
+_BATCH_DELETE_DOCS_MAX = 100
+
+
+def _delete_document_core(
+    db: Session,
+    kb_id: int,
+    doc_id: int,
+    user_id: int,
+) -> Literal["ok", "not_found"]:
+    """
+    删除单个文档（向量、MinIO、ProcessingTask、Document）。
+    成功则 commit；失败则 rollback 并抛出异常；未找到返回 not_found。
+    """
+    document = (
+        db.query(Document)
+        .join(KnowledgeBase)
+        .filter(
+            Document.id == doc_id,
+            Document.knowledge_base_id == kb_id,
+            KnowledgeBase.user_id == user_id,
+        )
+        .first()
+    )
+
+    if not document:
+        return "not_found"
+
+    try:
+        chunk_ids = [
+            str(row[0])
+            for row in db.query(DocumentChunk.id)
+            .filter(DocumentChunk.document_id == doc_id)
+            .all()
+        ]
+
+        if chunk_ids:
+            embeddings = EmbeddingsFactory.create()
+            vector_store = VectorStoreFactory.create(
+                store_type=settings.VECTOR_STORE_TYPE,
+                collection_name=f"kb_{kb_id}",
+                embedding_function=embeddings,
+            )
+            try:
+                vector_store.delete(chunk_ids)
+                logger.info(f"已从向量库删除文档 {doc_id} 的 {len(chunk_ids)} 个分块")
+            except Exception as e:
+                logger.warning(f"向量库删除分块失败（继续删除其他资源）: {e}")
+
+        minio_client = get_minio_client()
+        try:
+            minio_client.remove_object(settings.MINIO_BUCKET_NAME, document.file_path)
+            logger.info(f"已从 MinIO 删除文件: {document.file_path}")
+        except MinioException as e:
+            logger.warning(f"MinIO 删除文件失败（继续删除数据库记录）: {e}")
+
+        db.query(ProcessingTask).filter(
+            ProcessingTask.document_id == doc_id,
+        ).delete(synchronize_session=False)
+
+        db.delete(document)
+        db.commit()
+        return "ok"
+    except Exception as e:
+        db.rollback()
+        logger.error(f"删除文档 {doc_id} 失败: {e}")
+        raise
 
 
 @router.post("", response_model=KnowledgeBaseResponse)
@@ -120,8 +199,6 @@ def get_knowledge_base(
     """
     根据用户ID查询知识库
     """
-    from sqlalchemy.orm import joinedload
-
     kb = (
         db.query(KnowledgeBase)
         .options(
@@ -134,7 +211,27 @@ def get_knowledge_base(
     if not kb:
         raise HTTPException(status_code=404, detail="未找到知识库")
 
-    return kb
+    pending_rows = (
+        db.query(ProcessingTask)
+        .options(joinedload(ProcessingTask.document_upload))
+        .filter(
+            ProcessingTask.knowledge_base_id == kb_id,
+            ProcessingTask.document_id.is_(None),
+            ProcessingTask.status.in_(["pending", "processing"]),
+        )
+        .all()
+    )
+    pending_list = [
+        PendingUploadTaskResponse(
+            task_id=t.id,
+            status=t.status,
+            file_name=(t.document_upload.file_name if t.document_upload else "?"),
+            error_message=t.error_message,
+        )
+        for t in pending_rows
+    ]
+    data = KnowledgeBaseResponse.model_validate(kb)
+    return data.model_copy(update={"pending_upload_tasks": pending_list})
 
 
 @router.put("/{kb_id}", response_model=KnowledgeBaseResponse)
@@ -223,6 +320,16 @@ async def delete_knowledge_base(
         except Exception as e:
             cleanup_errors.append(f"无法清理矢量存储: {str(e)}")
             logger.error(f"kb{kb_id}的矢量存储清理错误 : {str(e)}")
+
+        # 3. 解除引用本知识库的外键，避免 MySQL 1451（evaluation_tasks、对话关联表等）
+        db.execute(
+            delete(chat_knowledge_bases).where(
+                chat_knowledge_bases.c.knowledge_base_id == kb_id
+            )
+        )
+        db.query(EvaluationTask).filter(
+            EvaluationTask.knowledge_base_id == kb_id
+        ).update({EvaluationTask.knowledge_base_id: None}, synchronize_session=False)
 
         # 最后在单个事务中删除数据库记录
         db.delete(kb)
@@ -474,15 +581,33 @@ async def process_kb_documents(
 
 async def add_processing_tasks_to_queue(task_data, kb_id):
     """
-    辅助函数将文档处理任务添加到队列中，而不会阻塞主响应。
+    在响应返回后并发执行各文档处理；内部通过 process_document_background
+    的 to_thread 避免阻塞事件循环。
     """
-    for data in task_data:
-        asyncio.create_task(
+    if not task_data:
+        return
+    results = await asyncio.gather(
+        *[
             process_document_background(
                 data["temp_path"], data["file_name"], kb_id, data["task_id"], None
             )
-        )
-    logger.info(f"已将{len(task_data)}个文档处理任务添加到队列")
+            for data in task_data
+        ],
+        return_exceptions=True,
+    )
+    for data, res in zip(task_data, results):
+        if isinstance(res, Exception):
+            logger.error(
+                "文档处理失败 task_id=%s file=%s: %s",
+                data.get("task_id"),
+                data.get("file_name"),
+                res,
+                exc_info=res if res.__traceback__ else None,
+            )
+    logger.info(
+        "文档处理批次结束：共 %s 个任务（失败见上方 error 日志）",
+        len(task_data),
+    )
 
 
 @router.post("/cleanup")
@@ -657,65 +782,62 @@ async def delete_document(
     """
     删除文档：移除向量索引、MinIO 文件及数据库记录。
     """
-    document = (
-        db.query(Document)
-        .join(KnowledgeBase)
+    try:
+        result = _delete_document_core(db, kb_id, doc_id, current_user.id)
+        if result == "not_found":
+            raise HTTPException(status_code=404, detail="文件未找到")
+        return {"message": "文档已删除", "doc_id": doc_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除文档失败: {str(e)}")
+
+
+@router.post("/{kb_id}/documents/batch-delete")
+async def batch_delete_documents(
+    kb_id: int,
+    body: BatchDeleteDocumentsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    批量删除文档；逐项执行，部分失败不影响其余项。
+    """
+    kb = (
+        db.query(KnowledgeBase)
         .filter(
-            Document.id == doc_id,
-            Document.knowledge_base_id == kb_id,
+            KnowledgeBase.id == kb_id,
             KnowledgeBase.user_id == current_user.id,
         )
         .first()
     )
+    if not kb:
+        raise HTTPException(status_code=404, detail="未找到知识库")
 
-    if not document:
-        raise HTTPException(status_code=404, detail="文件未找到")
+    raw_ids = list(dict.fromkeys(body.document_ids))
+    ids = [i for i in raw_ids if i > 0]
+    if not ids:
+        raise HTTPException(status_code=400, detail="请提供至少一个有效的 document_id")
+    if len(ids) > _BATCH_DELETE_DOCS_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"单次最多删除 {_BATCH_DELETE_DOCS_MAX} 个文档",
+        )
 
-    try:
-        # 1. 获取该文档的所有分块 ID（用于从向量库删除）
-        chunk_ids = [
-            row[0]
-            for row in db.query(DocumentChunk.id)
-            .filter(DocumentChunk.document_id == doc_id)
-            .all()
-        ]
+    deleted: List[int] = []
+    failed: List[Dict[str, Any]] = []
 
-        # 2. 从向量存储删除分块
-        if chunk_ids:
-            embeddings = EmbeddingsFactory.create()
-            vector_store = VectorStoreFactory.create(
-                store_type=settings.VECTOR_STORE_TYPE,
-                collection_name=f"kb_{kb_id}",
-                embedding_function=embeddings,
-            )
-            try:
-                vector_store.delete(chunk_ids)
-                logger.info(f"已从向量库删除文档 {doc_id} 的 {len(chunk_ids)} 个分块")
-            except Exception as e:
-                logger.warning(f"向量库删除分块失败（继续删除其他资源）: {e}")
-
-        # 3. 从 MinIO 删除文件
-        minio_client = get_minio_client()
+    for doc_id in ids:
         try:
-            minio_client.remove_object(settings.MINIO_BUCKET_NAME, document.file_path)
-            logger.info(f"已从 MinIO 删除文件: {document.file_path}")
-        except MinioException as e:
-            logger.warning(f"MinIO 删除文件失败（继续删除数据库记录）: {e}")
+            result = _delete_document_core(db, kb_id, doc_id, current_user.id)
+            if result == "ok":
+                deleted.append(doc_id)
+            else:
+                failed.append({"doc_id": doc_id, "detail": "文件未找到"})
+        except Exception as e:
+            failed.append({"doc_id": doc_id, "detail": str(e)})
 
-        # 4. 删除关联的 ProcessingTask（document_id 指向此文档的）
-        db.query(ProcessingTask).filter(
-            ProcessingTask.document_id == doc_id,
-        ).delete(synchronize_session=False)
-
-        # 5. 删除 Document（级联删除 DocumentChunk）
-        db.delete(document)
-        db.commit()
-
-        return {"message": "文档已删除", "doc_id": doc_id}
-    except Exception as e:
-        db.rollback()
-        logger.error(f"删除文档 {doc_id} 失败: {e}")
-        raise HTTPException(status_code=500, detail=f"删除文档失败: {str(e)}")
+    return {"deleted": deleted, "failed": failed}
 
 
 @router.post("/test-retrieval")
@@ -756,6 +878,7 @@ async def test_retrieval(
         results = vector_store.similarity_search_with_score(
             request.query, k=request.top_k
         )
+        results = dedupe_scored_pairs(results)
 
         response = []
         for doc, score in results:
@@ -770,4 +893,5 @@ async def test_retrieval(
         return {"results": response}
 
     except Exception as e:
+        logger.error(f"test-retrieval 错误: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

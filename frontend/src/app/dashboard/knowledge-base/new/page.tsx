@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { knowledgeBaseApi, ApiError } from "@/lib/api";
+import { PATH } from "@/lib/routes";
 import { ArrowLeftIcon } from "@/components/icons";
 
 export default function NewKnowledgeBasePage() {
@@ -46,7 +47,7 @@ export default function NewKnowledgeBasePage() {
         name: name.trim(),
         description: description.trim() || null,
       });
-      router.push("/dashboard/knowledge-base");
+      router.push(PATH.knowledgeBase);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "创建失败，请稍后重试");
     } finally {
@@ -61,7 +62,7 @@ export default function NewKnowledgeBasePage() {
       {/* 返回链接 */}
       <div className="mb-6">
         <Link
-          href="/dashboard/knowledge-base"
+          href={PATH.knowledgeBase}
           className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1"
         >
           <ArrowLeftIcon className="w-4 h-4" />
@@ -84,7 +85,7 @@ export default function NewKnowledgeBasePage() {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="输入知识库名称"
+            placeholder="例如：产品手册、内部规范（必填）"
             maxLength={255}
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
@@ -98,7 +99,7 @@ export default function NewKnowledgeBasePage() {
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="输入知识库描述（可选）"
+            placeholder="留空则不保存描述；可写用途、文档范围等便于日后识别"
             rows={4}
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
           />
@@ -121,7 +122,7 @@ export default function NewKnowledgeBasePage() {
             {loading ? "创建中..." : "创建知识库"}
           </button>
           <Link
-            href="/dashboard/knowledge-base"
+            href={PATH.knowledgeBase}
             className="px-5 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
           >
             取消

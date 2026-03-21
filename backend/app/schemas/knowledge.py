@@ -89,7 +89,7 @@ class ProcessingTask(ProcessingTaskBase):
     """处理任务的响应"""
 
     id: int
-    document_id: int
+    document_id: Optional[int] = None
     knowledge_base_id: int
     created_at: datetime
     updated_at: datetime
@@ -112,6 +112,15 @@ class DocumentResponse(DocumentBase):
         from_attributes = True
 
 
+class PendingUploadTaskResponse(BaseModel):
+    """尚未关联 Document 的处理中任务（上传后、正式入库前 document_id 为空）"""
+
+    task_id: int
+    status: str
+    file_name: str
+    error_message: Optional[str] = None
+
+
 class KnowledgeBaseResponse(KnowledgeBaseBase):
     """知识库的 API 响应，包含文档列表"""
 
@@ -120,6 +129,7 @@ class KnowledgeBaseResponse(KnowledgeBaseBase):
     created_at: datetime
     updated_at: datetime
     documents: List[DocumentResponse] = []
+    pending_upload_tasks: List[PendingUploadTaskResponse] = []
 
     class Config:
         from_attributes = True

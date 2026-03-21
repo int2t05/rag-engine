@@ -1,55 +1,38 @@
 """
-RAG 评估执行服务
-================
-根据《RAG评估业务流程最佳实践》实现后台异步评估逻辑。
+RAG 评估执行服务（对应《RAG评估业务流程最佳实践》第二节 Step 4）
 
-对每个测试用例执行：
-1. 检索 - RetrievalForEvaluation：使用知识库向量存储检索 top_k 相关文档
-2. 生成 - AnswerGenerator：基于上下文生成答案（仅依据上下文原则）
-3. 评估 - RagasEvaluator：Context Relevance、Faithfulness、Answer Relevancy 等
-4. 保存 - 写入 EvaluationResult，判定 passed 状态
-
-通过标准：三个核心指标均 ≥ 0.6
+每条用例：检索 → 生成 → RAGAS 打分 → 落库；阈值见 ``PASS_THRESHOLD``（与文档核心指标 0.6 一致）。
 """
 
+import asyncio
+import logging
 import time
-from typing import List, Optional, Any
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy.orm import Session
 from langchain_core.messages import HumanMessage
+from sqlalchemy.orm import Session
 
-from app.db.session import SessionLocal
 from app.core.config import settings
-from app.models.evaluation import (
-    EvaluationTask,
-    EvaluationTestCase,
-    EvaluationResult,
-)
-from app.models.knowledge import KnowledgeBase, Document
-
-from app.services.vector_store import VectorStoreFactory
-from app.services.embedding.embedding_factory import EmbeddingsFactory
-from app.services.llm.llm_factory import LLMFactory
+from app.db.session import SessionLocal
+from app.models.evaluation import EvaluationResult, EvaluationTask, EvaluationTestCase
+from app.models.knowledge import Document, KnowledgeBase
 from app.services.evaluation.evaluation_config import (
-    get_metrics_for_type,
+    AVG_SUMMARY_KEYS,
     EVALUATION_TYPE_NEEDS_GENERATION,
     EVALUATION_TYPE_NEEDS_RETRIEVAL,
+    SCORE_KEYS,
+    resolve_metrics,
 )
-import logging
+from app.services.embedding.embedding_factory import EmbeddingsFactory
+from app.services.llm.llm_factory import LLMFactory
+from app.services.vector_store import VectorStoreFactory
+from app.services.rag_dedupe import dedupe_retrieved_documents
 
-# RAGAS 相关
+# RAGAS collections + 本模块严格指标
 _RAGAS_AVAILABLE = False
-_RAGAS_IMPORT_ERROR: Optional[str] = None  # 导入失败时的错误信息
+_RAGAS_IMPORT_ERROR: Optional[str] = None
 try:
-    from ragas import evaluate
-    from ragas.metrics import (
-        faithfulness,
-        answer_relevancy,
-        context_precision,
-        context_recall,
-    )
-    from datasets import Dataset
-    from ragas.llms import LangchainLLMWrapper
+    import ragas.metrics.collections  # noqa: F401
 
     _RAGAS_AVAILABLE = True
 except ImportError as e:
@@ -66,6 +49,7 @@ def _retrieve(
 ) -> List[str]:
     """检索阶段：对 query 进行向量检索，返回 top_k 个文档片段文本。"""
     docs = vector_store.similarity_search(query, k=top_k)
+    docs = dedupe_retrieved_documents(docs)
     return [d.page_content for d in docs]
 
 
@@ -103,17 +87,19 @@ def _evaluate_with_ragas(
     contexts: List[str],
     answer: str,
     ground_truth: str,
-    llm: Any,
-    embeddings: Any,
-    metrics_to_use: Optional[List[str]] = None,
+    metrics_to_use: List[str],
 ) -> dict:
-    """
-    使用 RAGAS 评估单个样本。
-    metrics_to_use: 可选，指定要评估的指标。None 表示全量评估。
-    RAGAS 需要 answer 列，retrieval 类型传空字符串时，生成类指标将为 None。
-    """
-    # logger = logging.getLogger(__name__)
-    # logger.info(f"_RAGAS_AVAILABLE:{_RAGAS_AVAILABLE}")
+    """单条样本：RAGAS collections ascore（Strict 提示 + 重试）。"""
+    from app.services.evaluation.ragas_eval import (
+        build_metric_instances,
+        build_ragas_dependencies,
+        empty_score_row,
+        evaluate_metrics_sample,
+        metrics_need_embeddings,
+    )
+
+    if not metrics_to_use:
+        return empty_score_row()
 
     if not _RAGAS_AVAILABLE:
         logging.warning(
@@ -121,147 +107,44 @@ def _evaluate_with_ragas(
             f"导入错误: {_RAGAS_IMPORT_ERROR or '未知'}"
         )
         return {
-            "context_relevance": None,
-            "faithfulness": None,
-            "answer_relevance": None,
-            "context_precision": None,
-            "context_recall": None,
-            "ragas_score": None,
+            **empty_score_row(),
             "error": f"RAGAS 未安装: {_RAGAS_IMPORT_ERROR or '请 pip install ragas datasets'}",
         }
 
-    if not metrics_to_use:
-        metrics_to_use = [
-            "context_relevance",
-            "context_precision",
-            "context_recall",
-            "faithfulness",
-            "answer_relevance",
-        ]
-
-    try:
-        # 构建 RAGAS 数据集格式（HuggingFace Dataset）
-        eval_data = {
-            "question": [question],
-            "contexts": [contexts],
-            "answer": [answer],
-            "ground_truth": [ground_truth or ""],
-        }
-        dataset = Dataset.from_dict(eval_data)
-
-        ragas_llm = LangchainLLMWrapper(langchain_llm=llm)
-
-        # 按需选择 RAGAS 指标（context_precision 依赖 answer，无答案时仅评估 context_recall）
-        ragas_metrics = []
-        if (
-            any(m in metrics_to_use for m in ("context_precision", "context_relevance"))
-            and answer
-        ):
-            ragas_metrics.append(context_precision)
-        if "context_recall" in metrics_to_use:
-            ragas_metrics.append(context_recall)
-        if "faithfulness" in metrics_to_use:
-            ragas_metrics.append(faithfulness)
-        if "answer_relevance" in metrics_to_use:
-            ragas_metrics.append(answer_relevancy)
-
-        if not ragas_metrics:
-            return {
-                "context_relevance": None,
-                "faithfulness": None,
-                "answer_relevance": None,
-                "context_precision": None,
-                "context_recall": None,
-                "ragas_score": None,
-            }
-
-        result = evaluate(
-            dataset=dataset,
-            metrics=ragas_metrics,
-            llm=ragas_llm,
-            embeddings=embeddings,
-            show_progress=False,
+    async def _run() -> dict:
+        need_emb = metrics_need_embeddings(metrics_to_use)
+        llm, emb = build_ragas_dependencies(need_emb)
+        inst = build_metric_instances(llm, emb, metrics_to_use)
+        return await evaluate_metrics_sample(
+            inst,
+            user_input=question,
+            response=answer or "",
+            retrieved_contexts=contexts,
+            reference=ground_truth or "",
         )
 
-        # 提取分数（RAGAS 返回 dict 或具名结果对象）
-        def _get_score(name: str) -> Optional[float]:
-            val = getattr(result, name, None) if hasattr(result, name) else None
-            if val is None and isinstance(result, dict):
-                val = result.get(name)
-            if val is None:
-                return None
-            if hasattr(val, "__iter__") and not isinstance(val, str):
-                arr = list(val)
-                return float(arr[0]) if arr else None
-            try:
-                return float(val)
-            except (TypeError, ValueError):
-                return None
-
-        cp = _get_score("context_precision")
-        cr = _get_score("context_recall")
-        f = _get_score("faithfulness")
-        ar = _get_score("answer_relevancy")
-
-        # context_relevance 映射为 context_precision（文档中「上下文相关性」）
-        context_relevance = cp
-        ragas_score = None
-        if f is not None and ar is not None and context_relevance is not None:
-            ragas_score = (context_relevance + f + ar) / 3.0
-
-        return {
-            "context_relevance": context_relevance,
-            "faithfulness": f,
-            "answer_relevance": ar,
-            "context_precision": cp,
-            "context_recall": cr,
-            "ragas_score": ragas_score,
-        }
+    try:
+        return asyncio.run(_run())
     except Exception as e:
         logging.exception("RAGAS 评估执行异常: %s", e)
-        return {
-            "context_relevance": None,
-            "faithfulness": None,
-            "answer_relevance": None,
-            "context_precision": None,
-            "context_recall": None,
-            "ragas_score": None,
-            "error": str(e),
-        }
+        return {**empty_score_row(), "error": str(e)}
 
 
-def _is_passed(scores: dict, eval_type: str = "full") -> int:
+def _is_passed(scores: dict, metrics_used: List[str]) -> int:
     """
-    判定是否通过，按评估类型采用不同标准：
-    - full: 三个核心指标均 ≥ 0.6
-    - retrieval: 检索指标均 ≥ 0.6
-    - generation: 生成指标均 ≥ 0.6
+    本次任务所选指标均须有有效分数，且均 ≥ PASS_THRESHOLD。
     """
-    if eval_type == "retrieval":
-        cr = scores.get("context_relevance") or scores.get("context_precision")
-        cr_recall = scores.get("context_recall")
-        vals = [cr, cr_recall]
-        vals = [v for v in vals if v is not None]
-        if not vals:
+    for m in metrics_used:
+        v = scores.get(m)
+        if v is None:
             return 0
-        return 1 if all(v >= PASS_THRESHOLD for v in vals) else 0
-    if eval_type == "generation":
-        f = scores.get("faithfulness")
-        ar = scores.get("answer_relevance")
-        if f is None or ar is None:
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
             return 0
-        return 1 if (f >= PASS_THRESHOLD and ar >= PASS_THRESHOLD) else 0
-    # full
-    cr = scores.get("context_relevance")
-    f = scores.get("faithfulness")
-    ar = scores.get("answer_relevance")
-    if cr is None or f is None or ar is None:
-        return 0
-    return (
-        1
-        if (cr >= PASS_THRESHOLD and f >= PASS_THRESHOLD and ar >= PASS_THRESHOLD)
-        else 0
-    )
+        if fv < PASS_THRESHOLD:
+            return 0
+    return 1
 
 
 def run_evaluation_task(task_id: int) -> None:
@@ -325,11 +208,7 @@ def run_evaluation_task(task_id: int) -> None:
         # 用于生成的 LLM（非流式，temperature=0）
         llm = LLMFactory.create(temperature=0, streaming=False)
 
-        # RAGAS 需要的 embeddings（若未安装 ragas，评估会跳过得分）
-        embeddings = None
-        if _RAGAS_AVAILABLE:
-            embeddings = EmbeddingsFactory.create()
-        else:
+        if not _RAGAS_AVAILABLE:
             logging.warning(
                 "RAGAS 未安装，评估将执行检索和生成，但无法计算评分。"
                 "请执行: pip install ragas datasets"
@@ -339,15 +218,12 @@ def run_evaluation_task(task_id: int) -> None:
         eval_type = (task.evaluation_type or "full").lower()
         needs_retrieval = EVALUATION_TYPE_NEEDS_RETRIEVAL.get(eval_type, True)
         needs_generation = EVALUATION_TYPE_NEEDS_GENERATION.get(eval_type, True)
-        metrics_for_type = get_metrics_for_type(eval_type)
+        raw_em = getattr(task, "evaluation_metrics", None)
+        metrics_for_type = resolve_metrics(eval_type, raw_em)
 
         start_time = time.time()
         total_passed = 0
-        scores_context = []
-        scores_faith = []
-        scores_answer = []
-        scores_cp = []
-        scores_cr = []
+        score_lists: Dict[str, List[float]] = {k: [] for k in SCORE_KEYS}
 
         # 3. 对每个测试用例：检索 → 生成（按需）→ 评估 → 保存
         for tc in test_cases:
@@ -369,29 +245,29 @@ def run_evaluation_task(task_id: int) -> None:
                 contexts=retrieved_contexts,
                 answer=generated_answer or "",
                 ground_truth=tc.reference or "",
-                llm=llm,
-                embeddings=embeddings,
                 metrics_to_use=metrics_for_type,
             )
 
-            passed = _is_passed(scores, eval_type)
+            passed = _is_passed(scores, metrics_for_type)
             total_passed += passed
 
-            if scores.get("context_relevance") is not None:
-                scores_context.append(scores["context_relevance"])
-            if scores.get("context_precision") is not None:
-                scores_cp.append(scores["context_precision"])
-            if scores.get("context_recall") is not None:
-                scores_cr.append(scores["context_recall"])
-            if scores.get("faithfulness") is not None:
-                scores_faith.append(scores["faithfulness"])
-            if scores.get("answer_relevance") is not None:
-                scores_answer.append(scores["answer_relevance"])
+            for k in SCORE_KEYS:
+                v = scores.get(k)
+                if v is not None:
+                    try:
+                        score_lists[k].append(float(v))
+                    except (TypeError, ValueError):
+                        pass
 
-            # 3d. 保存结果（按类型只保留该类型的指标，其余置为 None）
+            # 3d. 保存结果（仅持久化列上存在的指标；answer_correctness 等在 judge_details）
             def _mask_score(name: str) -> Optional[float]:
                 return scores.get(name) if name in metrics_for_type else None
 
+            _three_core = (
+                "context_relevance" in metrics_for_type
+                and "faithfulness" in metrics_for_type
+                and "answer_relevance" in metrics_for_type
+            )
             result = EvaluationResult(
                 task_id=task_id,
                 test_case_id=tc.id,
@@ -403,34 +279,24 @@ def run_evaluation_task(task_id: int) -> None:
                 context_recall=_mask_score("context_recall"),
                 context_precision=_mask_score("context_precision"),
                 ragas_score=(
-                    scores.get("ragas_score")
-                    if (
-                        "context_relevance" in metrics_for_type
-                        or "context_precision" in metrics_for_type
-                    )
-                    and "faithfulness" in metrics_for_type
-                    and "answer_relevance" in metrics_for_type
-                    else None
+                    scores.get("ragas_score") if _three_core else None
                 ),
                 passed=passed,
                 judge_details={
                     k: v
                     for k, v in scores.items()
-                    if k in metrics_for_type or k in ("ragas_score", "error")
+                    if k
+                    in set(metrics_for_type)
+                    | {"ragas_score", "error", "skipped", "answer_correctness"}
                 },
             )
             db.add(result)
             db.commit()
 
-        # 4. 汇总统计，更新任务 summary 和 status（按评估类型返回对应指标）
+        # 4. 汇总统计
         duration = time.time() - start_time
         n = len(test_cases)
         pass_rate = total_passed / n if n else 0
-        avg_cr = sum(scores_context) / len(scores_context) if scores_context else None
-        avg_f = sum(scores_faith) / len(scores_faith) if scores_faith else None
-        avg_ar = sum(scores_answer) / len(scores_answer) if scores_answer else None
-        avg_cp = sum(scores_cp) / len(scores_cp) if scores_cp else None
-        avg_cr_val = sum(scores_cr) / len(scores_cr) if scores_cr else None
 
         base_summary: dict = {
             "total": n,
@@ -439,42 +305,14 @@ def run_evaluation_task(task_id: int) -> None:
             "pass_rate": round(pass_rate, 4),
             "duration_seconds": round(duration, 2),
             "evaluation_type": eval_type,
+            "metrics": metrics_for_type,
         }
         if not _RAGAS_AVAILABLE:
             base_summary["warning"] = "RAGAS 未安装，无法计算评分。请执行: pip install ragas datasets"
-        if eval_type == "retrieval":
-            base_summary["avg_context_relevance"] = (
-                round(avg_cr, 4) if avg_cr is not None else None
-            )
-            base_summary["avg_context_precision"] = (
-                round(avg_cp, 4) if avg_cp is not None else None
-            )
-            base_summary["avg_context_recall"] = (
-                round(avg_cr_val, 4) if avg_cr_val is not None else None
-            )
-        elif eval_type == "generation":
-            base_summary["avg_faithfulness"] = (
-                round(avg_f, 4) if avg_f is not None else None
-            )
-            base_summary["avg_answer_relevance"] = (
-                round(avg_ar, 4) if avg_ar is not None else None
-            )
-        else:
-            base_summary["avg_context_relevance"] = (
-                round(avg_cr, 4) if avg_cr is not None else None
-            )
-            base_summary["avg_faithfulness"] = (
-                round(avg_f, 4) if avg_f is not None else None
-            )
-            base_summary["avg_answer_relevance"] = (
-                round(avg_ar, 4) if avg_ar is not None else None
-            )
-            base_summary["avg_context_precision"] = (
-                round(avg_cp, 4) if avg_cp is not None else None
-            )
-            base_summary["avg_context_recall"] = (
-                round(avg_cr_val, 4) if avg_cr_val is not None else None
-            )
+        for k, label in AVG_SUMMARY_KEYS.items():
+            vals = score_lists[k]
+            if vals:
+                base_summary[label] = round(sum(vals) / len(vals), 4)
 
         task.summary = base_summary  # type: ignore
         task.status = "completed"  # type: ignore

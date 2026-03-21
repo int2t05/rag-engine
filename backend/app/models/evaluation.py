@@ -23,6 +23,8 @@ class EvaluationTask(Base, TimestampMixin):
     # 评估配置
     top_k = Column(Integer, default=5)
     evaluation_type = Column(String(50), default="full")  # retrieval / generation / full
+    # 可选：自定义要计算的指标名列表（JSON 数组），为空则按 evaluation_type 默认指标
+    evaluation_metrics = Column(JSON, nullable=True)
 
     # 状态
     status = Column(String(20), default="pending")  # pending / running / completed / failed

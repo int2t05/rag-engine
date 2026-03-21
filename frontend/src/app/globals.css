@@ -3,14 +3,13 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8f6f3;
+  --foreground: #0c0f14;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
 }
 
 @layer utilities {
@@ -89,12 +88,12 @@ body {
   line-height: 1.6; font-family: ui-monospace, monospace;
 }
 .md-content .md-link {
-  color: #2563eb; text-decoration: underline;
-  text-decoration-color: #93c5fd; text-underline-offset: 2px;
+  color: #0d726e; text-decoration: underline;
+  text-decoration-color: rgba(13, 114, 110, 0.35); text-underline-offset: 2px;
 }
-.md-content .md-link:hover { text-decoration-color: #2563eb; }
+.md-content .md-link:hover { text-decoration-color: #0d726e; }
 .md-content .md-citation {
-  color: #2563eb; font-size: 0.7rem; font-weight: 600; cursor: default;
+  color: #0d726e; font-size: 0.7rem; font-weight: 600; cursor: default;
 }
 .md-content .md-ul,
 .md-content .md-ol { padding-left: 1.5em; margin: 0.4em 0; }

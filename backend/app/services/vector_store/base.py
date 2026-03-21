@@ -19,8 +19,12 @@ class BaseVectorStore(ABC):
         pass  # 语法占位符
 
     @abstractmethod
-    def add_documents(self, documents: List[Document]) -> None:
-        """将文档添加到矢量存储"""
+    def add_documents(
+        self,
+        documents: List[Document],
+        ids: Optional[List[str]] = None,
+    ) -> None:
+        """将文档添加到矢量存储。ids 须与 documents 等长，且与库表 document_chunks.id 一致以便删除时按 id 清理向量。"""
         pass
 
     @abstractmethod

@@ -12,7 +12,10 @@
 
 "use client";
 import { useEffect, useState, useCallback, useRef } from "react";
-import { chatApi, knowledgeBaseApi, Chat, ChatMessage, ApiError } from "@/lib/api";
+import { chatApi, knowledgeBaseApi, Chat, ChatMessage, ApiError, type Citation } from "@/lib/api";
+import { parseFastApiErrorBody } from "@/lib/api-errors";
+import { DEFAULT_CHAT_TITLE_PREFIX } from "@/lib/form-defaults";
+import { citationsFromRagContextBase64 } from "@/lib/rag-context";
 import { ChatIcon, XIcon } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Toast } from "@/components/Toast";
@@ -25,53 +28,34 @@ import {
   EnrichedMessage,
 } from "@/components/chat";
 
-// ==================== 类型定义 ====================
-
-/** 引用来源类型（页面内部使用，与 api.ts 保持一致） */
-interface Citation {
-  index: number;
-  page_content: string;
-  metadata: Record<string, unknown>;
-}
-
 // ==================== 工具函数 ====================
 
 /**
  * 从消息内容中解析引用上下文
  * @description 后端返回格式: Base64(上下文 JSON) + "__LLM_RESPONSE__" + LLM 回复
- *
- * @param content - 原始消息内容
- * @returns 解析后的文本和引用列表
  */
 function parseCitationsFromContent(
   content: string,
 ): { text: string; citations: Citation[] } {
-  const citations: Citation[] = [];
-
   if (!content.includes("__LLM_RESPONSE__")) {
-    return { text: content, citations };
+    return { text: content, citations: [] };
   }
 
   const parts = content.split("__LLM_RESPONSE__");
   const contextBase64 = parts[0];
   const llmResponse = parts.slice(1).join("__LLM_RESPONSE__");
-
-  try {
-    const decodedContext = JSON.parse(atob(contextBase64));
-    if (decodedContext.context && Array.isArray(decodedContext.context)) {
-      citations.push(
-        ...decodedContext.context.map((doc: Record<string, unknown>, idx: number) => ({
-          index: idx + 1,
-          page_content: doc.page_content as string,
-          metadata: (doc.metadata as Record<string, unknown>) || {},
-        })),
-      );
-    }
-  } catch {
-    // 上下文解析失败，仅返回 LLM 回复
-  }
-
+  const citations = citationsFromRagContextBase64(contextBase64);
   return { text: llmResponse, citations };
+}
+
+/**
+ * 取 SSE 行中的 data 载荷。
+ * 兼容行尾 \\r、以及 `data:` 与正文之间有无空格（部分代理/服务器格式）。
+ */
+function sseDataPayload(line: string): string | null {
+  const t = line.replace(/\r$/, "").trimEnd();
+  if (!t.toLowerCase().startsWith("data:")) return null;
+  return t.slice(5).trimStart();
 }
 
 // ==================== 主组件 ====================
@@ -110,6 +94,10 @@ export default function ChatPage() {
 
   /** 删除确认 */
   const [confirmDelete, setConfirmDelete] = useState<Chat | null>(null);
+  /** 批量删除对话 */
+  const [selectedChatIds, setSelectedChatIds] = useState<number[]>([]);
+  const [confirmBatchDeleteChats, setConfirmBatchDeleteChats] = useState(false);
+  const [batchDeletingChats, setBatchDeletingChats] = useState(false);
 
   /** Toast 提示 */
   const [toast, setToast] = useState({
@@ -170,6 +158,11 @@ export default function ChatPage() {
     fetchKbOptions();
   }, [fetchChats, fetchKbOptions]);
 
+  useEffect(() => {
+    const valid = new Set(chats.map((c) => c.id));
+    setSelectedChatIds((prev) => prev.filter((id) => valid.has(id)));
+  }, [chats]);
+
   /** 自动滚动到最新消息 */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -208,19 +201,24 @@ export default function ChatPage() {
    * 创建新对话
    */
   const handleCreateChat = useCallback(async () => {
-    if (!newChatTitle.trim()) {
-      setFormError("请输入对话标题");
-      return;
-    }
     if (selectedKbs.length === 0) {
       setFormError("请选择至少一个知识库");
       return;
     }
 
+    const title =
+      newChatTitle.trim() ||
+      `${DEFAULT_CHAT_TITLE_PREFIX} · ${new Date().toLocaleString("zh-CN", {
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })}`;
+
     setCreatingChat(true);
     try {
       const chat = await chatApi.create({
-        title: newChatTitle,
+        title,
         knowledge_base_ids: selectedKbs,
       });
       setChats((prev) => [chat, ...prev]);
@@ -267,6 +265,44 @@ export default function ChatPage() {
     }
   }, [confirmDelete, currentChat, showToast]);
 
+  const toggleSelectChat = useCallback((chat: Chat) => {
+    setSelectedChatIds((prev) =>
+      prev.includes(chat.id) ? prev.filter((x) => x !== chat.id) : [...prev, chat.id],
+    );
+  }, []);
+
+  const selectAllChats = useCallback(() => {
+    setSelectedChatIds(chats.map((c) => c.id));
+  }, [chats]);
+
+  const doBatchDeleteChats = useCallback(async () => {
+    if (selectedChatIds.length === 0) return;
+    setBatchDeletingChats(true);
+    try {
+      const res = await chatApi.batchDelete(selectedChatIds);
+      const removed = new Set(res.deleted);
+      setChats((prev) => prev.filter((c) => !removed.has(c.id)));
+      if (currentChat && removed.has(currentChat.id)) {
+        setCurrentChat(null);
+        setMessages([]);
+      }
+      setSelectedChatIds([]);
+      setConfirmBatchDeleteChats(false);
+      if (res.not_found.length > 0) {
+        showToast(
+          `已删除 ${res.deleted.length} 个对话（${res.not_found.length} 个 ID 未找到）`,
+          "info",
+        );
+      } else {
+        showToast(`已删除 ${res.deleted.length} 个对话`, "success");
+      }
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "批量删除失败", "error");
+    } finally {
+      setBatchDeletingChats(false);
+    }
+  }, [selectedChatIds, currentChat, showToast]);
+
   /**
    * 发送消息
    */
@@ -303,11 +339,7 @@ export default function ChatPage() {
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        const msg =
-          typeof err.detail === "string"
-            ? err.detail
-            : err.detail?.msg || "发送消息失败";
-        throw new Error(msg);
+        throw new Error(parseFastApiErrorBody(err, "发送消息失败"));
       }
 
       const reader = response.body?.getReader();
@@ -316,6 +348,8 @@ export default function ChatPage() {
       const decoder = new TextDecoder();
       let fullContent = "";
       let citations: Citation[] = [];
+      /** 上行 SSE 可能在 TCP chunk 边界截断，需拼接半行后再解析 */
+      let lineBuf = "";
       setMessages((prev) => [
         ...prev,
         {
@@ -327,67 +361,63 @@ export default function ChatPage() {
       ]);
       setStreaming(true);
 
-      // 流式读取响应
+      const handleSseLine = (line: string) => {
+        const data = sseDataPayload(line);
+        if (data === null) return;
+        if (data === "[DONE]") return;
+
+        try {
+          const parsed = JSON.parse(data) as { text?: unknown };
+          if (!("text" in parsed) || parsed.text === undefined || parsed.text === null) {
+            return;
+          }
+          let text =
+            typeof parsed.text === "string" ? parsed.text : String(parsed.text);
+
+          if (text.includes("__LLM_RESPONSE__")) {
+            const parts = text.split("__LLM_RESPONSE__");
+            const contextBase64 = parts[0];
+            const llmResponse = parts.slice(1).join("__LLM_RESPONSE__");
+            citations = citationsFromRagContextBase64(contextBase64);
+            text = llmResponse;
+          }
+
+          // 首包可能只有 Base64+分隔符、尚无 LLM 字符；也要写入 citations，否则「参考来源」不显示
+          // 注意：勿用 if (!parsed.text) 提前 return，空字符串 "" 也是合法负载
+          if (text) {
+            fullContent += text;
+          }
+          if (text || citations.length > 0) {
+            const snapshot = fullContent;
+            const snapshotCitations = citations;
+            setMessages((prev) => {
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                role: "assistant",
+                content: snapshot,
+                citations: snapshotCitations,
+              };
+              return updated;
+            });
+          }
+        } catch {
+          /* 单行非合法 JSON 时跳过 */
+        }
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split("\n");
-
+        lineBuf += decoder.decode(value, { stream: true });
+        const lines = lineBuf.split("\n");
+        lineBuf = lines.pop() ?? "";
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6);
-          if (data === "[DONE]") continue;
-
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.text) {
-              let text = parsed.text;
-
-              // 解析引用上下文
-              if (text.includes("__LLM_RESPONSE__")) {
-                const parts = text.split("__LLM_RESPONSE__");
-                const contextBase64 = parts[0];
-                const llmResponse = parts.slice(1).join("__LLM_RESPONSE__");
-
-                try {
-                  const decodedContext = JSON.parse(atob(contextBase64));
-                  if (decodedContext.context && Array.isArray(decodedContext.context)) {
-                    citations = decodedContext.context.map(
-                      (doc: Record<string, unknown>, idx: number) => ({
-                        index: idx + 1,
-                        page_content: doc.page_content as string,
-                        metadata: (doc.metadata as Record<string, unknown>) || {},
-                      }),
-                    );
-                  }
-                } catch {
-                  // 上下文解析失败，忽略
-                }
-
-                text = llmResponse;
-              }
-
-              if (text) {
-                fullContent += text;
-                const snapshot = fullContent;
-                const snapshotCitations = citations;
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  updated[updated.length - 1] = {
-                    role: "assistant",
-                    content: snapshot,
-                    citations: snapshotCitations,
-                  };
-                  return updated;
-                });
-              }
-            }
-          } catch {
-            // 跳过解析错误
-          }
+          handleSseLine(line);
         }
+      }
+      if (lineBuf.trim()) {
+        handleSseLine(lineBuf);
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "发送消息失败");
@@ -449,6 +479,10 @@ export default function ChatPage() {
           onSelectChat={handleSelectChat}
           onDeleteChat={(chat) => setConfirmDelete(chat)}
           onNewChat={handleNewChat}
+          selectedIds={selectedChatIds}
+          onToggleSelect={toggleSelectChat}
+          onSelectAll={selectAllChats}
+          onBatchDelete={() => setConfirmBatchDeleteChats(true)}
         />
       </div>
 
@@ -479,6 +513,10 @@ export default function ChatPage() {
               onSelectChat={handleSelectChat}
               onDeleteChat={(chat) => setConfirmDelete(chat)}
               onNewChat={handleNewChat}
+              selectedIds={selectedChatIds}
+              onToggleSelect={toggleSelectChat}
+              onSelectAll={selectAllChats}
+              onBatchDelete={() => setConfirmBatchDeleteChats(true)}
             />
           </div>
         </div>
@@ -630,6 +668,17 @@ export default function ChatPage() {
         variant="danger"
         onConfirm={doDeleteChat}
         onCancel={() => setConfirmDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmBatchDeleteChats}
+        title="批量删除对话"
+        description={`确定删除已选中的 ${selectedChatIds.length} 个对话吗？删除后无法恢复。`}
+        confirmText="删除"
+        variant="danger"
+        loading={batchDeletingChats}
+        onConfirm={doBatchDeleteChats}
+        onCancel={() => setConfirmBatchDeleteChats(false)}
       />
 
       {/* ========== Toast 提示 ========== */}

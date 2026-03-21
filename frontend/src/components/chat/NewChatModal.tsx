@@ -65,15 +65,19 @@ export function NewChatModal({
           {/* 对话标题 */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              对话标题
+              对话标题{" "}
+              <span className="font-normal text-gray-500">（可选）</span>
             </label>
             <input
               type="text"
               value={title}
               onChange={(e) => onTitleChange(e.target.value)}
-              placeholder="例如：项目文档问答"
+              placeholder="留空则自动命名为「新对话 · 月/日 时:分」"
               className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
+            <p className="text-[11px] text-gray-500 mt-1.5">
+              填写后将作为列表中显示的名称；不填则由系统按时间生成，便于区分多条「新对话」。
+            </p>
           </div>
 
           {/* 选择知识库 */}

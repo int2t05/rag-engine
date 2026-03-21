@@ -8,7 +8,12 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { knowledgeBaseApi, DocumentItem, ApiError } from "@/lib/api";
-import { formatFileSize } from "@/lib/utils";
+import { PATH } from "@/lib/routes";
+import {
+  formatFileSize,
+  getLatestProcessingTask,
+  isDocumentProcessing,
+} from "@/lib/utils";
 import { ArrowLeftIcon, FileIcon, TrashIcon } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Toast } from "@/components/Toast";
@@ -106,15 +111,18 @@ export default function DocumentDetailPage() {
 
   // ==================== 数据获取 ====================
 
-  const fetchDocument = useCallback(async () => {
+  const fetchDocument = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
     try {
-      setError("");
+      if (!silent) setError("");
       const data = await knowledgeBaseApi.getDocument(Number(kbId), Number(docId));
       setDoc(data);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "获取文档详情失败");
+      if (!silent) {
+        setError(err instanceof ApiError ? err.message : "获取文档详情失败");
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [kbId, docId]);
 
@@ -122,12 +130,21 @@ export default function DocumentDetailPage() {
     fetchDocument();
   }, [fetchDocument]);
 
+  /** 直接打开详情 URL 时若仍在处理，轮询直至完成或失败 */
+  useEffect(() => {
+    if (!doc || !isDocumentProcessing(doc)) return;
+    const t = setInterval(() => {
+      fetchDocument({ silent: true });
+    }, 3000);
+    return () => clearInterval(t);
+  }, [doc, fetchDocument]);
+
   const handleDelete = useCallback(async () => {
     setDeleting(true);
     try {
       await knowledgeBaseApi.deleteDocument(Number(kbId), Number(docId));
       showToastMsg("文档已删除", "success");
-      setTimeout(() => router.replace(`/dashboard/knowledge-base/${kbId}`), 400);
+      setTimeout(() => router.replace(PATH.knowledgeBaseDetail(kbId)), 400);
     } catch (err) {
       showToastMsg(err instanceof ApiError ? err.message : "删除失败", "error");
       setDeleting(false);
@@ -148,7 +165,7 @@ export default function DocumentDetailPage() {
     return (
       <div className="max-w-3xl mx-auto">
         <Link
-          href={`/dashboard/knowledge-base/${kbId}`}
+          href={PATH.knowledgeBaseDetail(kbId)}
           className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1 mb-4"
         >
           <ArrowLeftIcon className="w-4 h-4" />
@@ -161,13 +178,43 @@ export default function DocumentDetailPage() {
     );
   }
 
-  const lastTask = doc.processing_tasks[doc.processing_tasks.length - 1];
+  const lastTask = getLatestProcessingTask(doc);
+
+  if (isDocumentProcessing(doc)) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-6">
+        <Link
+          href={PATH.knowledgeBaseDetail(kbId)}
+          className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1"
+        >
+          <ArrowLeftIcon className="w-4 h-4" />
+          返回知识库
+        </Link>
+
+        <div className="bg-white rounded-lg border border-amber-200 p-8 text-center shadow-sm">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-amber-50 mb-4">
+            <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+          <h1 className="text-lg font-semibold text-gray-800">文档处理中</h1>
+          <p className="text-sm text-gray-600 mt-2 truncate max-w-md mx-auto">
+            {doc.file_name}
+          </p>
+          <div className="mt-4 flex justify-center">
+            {lastTask ? <StatusBadge status={lastTask.status} /> : null}
+          </div>
+          <p className="text-sm text-gray-500 mt-4 leading-relaxed">
+            处理完成后将自动显示完整详情；您也可返回知识库稍后查看。
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* ========== 返回链接 ========== */}
       <Link
-        href={`/dashboard/knowledge-base/${kbId}`}
+        href={PATH.knowledgeBaseDetail(kbId)}
         className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1"
       >
         <ArrowLeftIcon className="w-4 h-4" />

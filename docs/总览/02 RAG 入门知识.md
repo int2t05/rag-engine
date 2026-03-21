@@ -816,11 +816,7 @@ flowchart TD
 
 ### 8.1 更新依赖项
 
-确保 `backend/requirements.txt` 文件中指定的依赖项版本是可用的。例如，将 `langchain-deepseek` 的版本更新为 `==0.1.1`：
-
-```plaintext
-langchain-deepseek==0.1.1
-```
+确保 `backend/requirements.txt` 中 LangChain 相关包版本彼此兼容。聊天侧 `CHAT_PROVIDER` 仅 `openai`（含 DeepSeek、智谱等一切 OpenAI 兼容端点，配置 `OPENAI_API_*`）或 `ollama`，无需单独安装 `langchain-deepseek`。
 
 ### 8.2 错误处理
 

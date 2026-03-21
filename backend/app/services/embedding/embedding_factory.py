@@ -1,70 +1,94 @@
 """
 Embedding 工厂
 =============
-根据 EMBEDDINGS_PROVIDER 配置创建文本嵌入模型实例。
+``EMBEDDINGS_PROVIDER`` 仅两种：
 
-Embedding 将文本转换为固定长度的向量表示，用于：
-- 文档分块向量化后写入向量数据库
-- 用户查询向量化后与知识库进行相似度检索
+- ``openai`` —— ``OpenAIEmbeddings`` + ``OPENAI_EMBEDDINGS_*``；若嵌入与对话不同网关，设
+  ``OPENAI_EMBEDDINGS_API_BASE``（及可选 ``OPENAI_EMBEDDINGS_API_KEY``），否则沿用 ``OPENAI_API_*``
+- ``ollama`` —— ``OllamaEmbeddings``；若嵌入节点与对话不同，设 ``OLLAMA_EMBEDDINGS_API_BASE``，否则 ``OLLAMA_API_BASE``
+
+别名：``open_ai`` → ``openai``。关闭 tiktoken 与 ``check_embedding_ctx_length`` 以减少网关兼容问题。
 """
 
-from app.core.config import settings
-from langchain_openai import OpenAIEmbeddings
+from __future__ import annotations
+
+from typing import Final
+
+from langchain_core.embeddings import Embeddings
 from langchain_ollama import OllamaEmbeddings
-from langchain_community.embeddings import DashScopeEmbeddings, ZhipuAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
+
+from app.core.config import settings
+
+
+def _openai_base(url: str) -> str:
+    b = (url or "").strip()
+    return b if not b or b.endswith("/") else f"{b}/"
+
+
+def _ollama_host(url: str) -> str:
+    return (url or "").strip().rstrip("/")
+
+
+_PROVIDER_ALIASES: Final[dict[str, str]] = {
+    "open_ai": "openai",
+}
+
+_SUPPORTED: Final[frozenset[str]] = frozenset({"ollama", "openai"})
+
+
+def _canonical_provider(raw: str) -> str:
+    key = (raw or "").strip().lower().replace("-", "_")
+    return _PROVIDER_ALIASES.get(key, key)
+
+
+def _openai_embeddings_base_url() -> str:
+    custom = (settings.OPENAI_EMBEDDINGS_API_BASE or "").strip()
+    return custom if custom else settings.OPENAI_API_BASE
+
+
+def _openai_embeddings_api_key() -> str:
+    custom = (settings.OPENAI_EMBEDDINGS_API_KEY or "").strip()
+    return custom if custom else settings.OPENAI_API_KEY
+
+
+def _ollama_embeddings_base_url() -> str:
+    custom = (settings.OLLAMA_EMBEDDINGS_API_BASE or "").strip()
+    return custom if custom else settings.OLLAMA_API_BASE
+
+
+def _openai_style_embeddings(*, api_key: str, base_url: str, model: str) -> Embeddings:
+    return OpenAIEmbeddings(
+        api_key=api_key,
+        base_url=_openai_base(base_url),
+        model=model,
+        tiktoken_enabled=False,
+        check_embedding_ctx_length=False,
+    )
 
 
 class EmbeddingsFactory:
-    """文本嵌入模型工厂，按配置创建对应 provider 的 Embedding 实例"""
+    """按配置创建文本嵌入模型（向量检索 / 入库）。"""
 
     @staticmethod
-    def create():
-        """
-        创建 Embedding 实例
+    def create() -> Embeddings:
+        provider = _canonical_provider(settings.EMBEDDINGS_PROVIDER)
 
-        根据 settings.EMBEDDINGS_PROVIDER 选择：
-        - openai: OpenAI / 兼容接口
-        - dashscope: 阿里云通义
-        - ollama: 本地 Ollama
-        - zhipu: 智谱 GLM
+        if provider not in _SUPPORTED:
+            raise ValueError(
+                f"不支持的 EMBEDDINGS_PROVIDER={settings.EMBEDDINGS_PROVIDER!r} "
+                f"（解析为 {provider!r}）。请使用 openai 或 ollama；"
+                "其它 OpenAI 兼容服务请设 openai 并配置 OPENAI_API_*。"
+            )
 
-        Returns:
-            Embeddings: LangChain 兼容的嵌入模型实例
-
-        Raises:
-            ValueError: 当 provider 不支持时
-        """
-        # Suppose your .env has a value like EMBEDDINGS_PROVIDER=openai
-        embeddings_provider = settings.EMBEDDINGS_PROVIDER.lower()
-
-        if embeddings_provider == "openai":
-            return OpenAIEmbeddings(
-                api_key=settings.OPENAI_API_KEY,
-                base_url=settings.OPENAI_API_BASE,
+        if provider == "openai":
+            return _openai_style_embeddings(
+                api_key=_openai_embeddings_api_key(),
+                base_url=_openai_embeddings_base_url(),
                 model=settings.OPENAI_EMBEDDINGS_MODEL,
-                # 禁用 tiktoken，避免：
-                # 1) embedding-3 系列模型无法映射到 tokenizer 的 KeyError
-                # 2) 从 openaipublic.blob.core.windows.net 下载 cl100k_base 时的 SSL/网络错误
-                tiktoken_enabled=False,
-            )
-        elif embeddings_provider == "dashscope":
-            return DashScopeEmbeddings(
-                model=settings.DASH_SCOPE_EMBEDDINGS_MODEL,
-                dashscope_api_key=settings.DASH_SCOPE_API_KEY,
-            )
-        elif embeddings_provider == "ollama":
-            return OllamaEmbeddings(
-                model=settings.OLLAMA_EMBEDDINGS_MODEL,
-                base_url=settings.OLLAMA_API_BASE,
-            )
-        elif embeddings_provider == "zhipu":
-            return ZhipuAIEmbeddings(
-                api_key=settings.ZHIPUAI_API_KEY,
-                model=settings.ZHIPUAI_EMBEDDINGS_MODEL,
             )
 
-        # Extend with other providers:
-        # elif embeddings_provider == "another_provider":
-        #     return AnotherEmbeddingClass(...)
-        else:
-            raise ValueError(f"Unsupported embeddings provider: {embeddings_provider}")
+        return OllamaEmbeddings(
+            model=settings.OLLAMA_EMBEDDINGS_MODEL,
+            base_url=_ollama_host(_ollama_embeddings_base_url()),
+        )

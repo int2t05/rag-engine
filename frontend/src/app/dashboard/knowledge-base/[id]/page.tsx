@@ -17,6 +17,7 @@ import {
   PreviewResult,
   RetrievalResult,
 } from "@/lib/api";
+import { PATH } from "@/lib/routes";
 import {
   ArrowLeftIcon,
   EditIcon,
@@ -27,7 +28,19 @@ import {
 } from "@/components/icons";
 import { Toast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { formatFileSize } from "@/lib/utils";
+import {
+  formatFileSize,
+  getLatestProcessingTask,
+  isDocumentProcessing,
+} from "@/lib/utils";
+import {
+  DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_TOP_K,
+  parseChunkOverlap,
+  parseChunkSize,
+  parseTopK,
+} from "@/lib/form-defaults";
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   pending: { label: "等待处理", color: "text-yellow-600 bg-yellow-50" },
@@ -61,12 +74,12 @@ export default function KnowledgeBaseDetailPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [processing, setProcessing] = useState(false);
-  const [taskMap, setTaskMap] = useState<Record<number, TaskStatus>>({});
   const [pollingTaskIds, setPollingTaskIds] = useState<number[]>([]);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const [chunkSize, setChunkSize] = useState(1000);
-  const [chunkOverlap, setChunkOverlap] = useState(200);
+  /** 留空则在预览时按系统默认（与向量化处理一致） */
+  const [chunkSizeInput, setChunkSizeInput] = useState("");
+  const [chunkOverlapInput, setChunkOverlapInput] = useState("");
   const [previewing, setPreviewing] = useState(false);
   const [previewData, setPreviewData] = useState<Record<number, PreviewResult>>({});
   const [previewError, setPreviewError] = useState("");
@@ -76,9 +89,13 @@ export default function KnowledgeBaseDetailPage() {
   const [cleaning, setCleaning] = useState(false);
   const [deletingDoc, setDeletingDoc] = useState<number | null>(null);
   const [confirmDeleteDoc, setConfirmDeleteDoc] = useState<DocumentItem | null>(null);
+  const [selectedDocIds, setSelectedDocIds] = useState<number[]>([]);
+  const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
 
   const [query, setQuery] = useState("");
-  const [topK, setTopK] = useState(5);
+  /** 检索条数；留空则按默认 */
+  const [topKInput, setTopKInput] = useState("");
   const [retrieving, setRetrieving] = useState(false);
   const [retrievalResults, setRetrievalResults] = useState<RetrievalResult[]>([]);
   const [retrievalError, setRetrievalError] = useState("");
@@ -107,6 +124,43 @@ export default function KnowledgeBaseDetailPage() {
     }
   }, [confirmDeleteDoc, kb, showToast]);
 
+  useEffect(() => {
+    if (!kb) return;
+    const valid = new Set(kb.documents.map((d) => d.id));
+    setSelectedDocIds((prev) => prev.filter((id) => valid.has(id)));
+  }, [kb]);
+
+  const handleBatchDeleteDocuments = useCallback(async () => {
+    if (!kb || selectedDocIds.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      const res = await knowledgeBaseApi.batchDeleteDocuments(kb.id, selectedDocIds);
+      const removed = new Set(res.deleted);
+      setKb((prev) =>
+        prev
+          ? {
+              ...prev,
+              documents: prev.documents.filter((d) => !removed.has(d.id)),
+            }
+          : null,
+      );
+      setSelectedDocIds([]);
+      setConfirmBatchDelete(false);
+      if (res.failed.length > 0) {
+        showToast(
+          `已删除 ${res.deleted.length} 个，${res.failed.length} 个未删除或失败`,
+          "info",
+        );
+      } else {
+        showToast(`已删除 ${res.deleted.length} 个文档`, "success");
+      }
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "批量删除失败", "error");
+    } finally {
+      setBatchDeleting(false);
+    }
+  }, [kb, selectedDocIds, showToast]);
+
   const fetchKb = useCallback(async () => {
     try {
       setError("");
@@ -122,6 +176,18 @@ export default function KnowledgeBaseDetailPage() {
   useEffect(() => {
     fetchKb();
   }, [fetchKb]);
+
+  /** 刷新后仍有队列中的上传任务时，自动加入轮询以便更新文档列表中的处理状态 */
+  useEffect(() => {
+    const pending = kb?.pending_upload_tasks;
+    if (!pending?.length) return;
+    const ids = pending.map((t) => t.task_id);
+    setPollingTaskIds((prev) => {
+      const newIds = ids.filter((id) => !prev.includes(id));
+      if (newIds.length === 0) return prev;
+      return [...prev, ...newIds];
+    });
+  }, [kb]);
 
   const handleUpload = async (files: FileList | File[]) => {
     if (!files.length) return;
@@ -161,11 +227,13 @@ export default function KnowledgeBaseDetailPage() {
     setPreviewing(true);
     setPreviewError("");
     setPreviewData({});
+    const cs = parseChunkSize(chunkSizeInput);
+    const co = parseChunkOverlap(chunkOverlapInput, cs);
     try {
       const data = await knowledgeBaseApi.previewDocuments(Number(id), {
         document_ids: docIds,
-        chunk_size: chunkSize,
-        chunk_overlap: chunkOverlap,
+        chunk_size: cs,
+        chunk_overlap: co,
       });
       setPreviewData(data);
       setShowPreview(true);
@@ -210,15 +278,19 @@ export default function KnowledgeBaseDetailPage() {
         for (const [k, v] of Object.entries(data)) {
           mapped[Number(k)] = v as TaskStatus;
         }
-        setTaskMap(mapped);
 
-        const allDone = Object.values(mapped).every(
-          (t) => t.status === "completed" || t.status === "failed",
-        );
+        // 同步刷新知识库详情，使文档列表出现新行并展示 processing_tasks（处理中状态）
+        await fetchKb();
+
+        const statuses = pollingTaskIds.map((tid) => mapped[tid]);
+        const allDone =
+          statuses.length === pollingTaskIds.length &&
+          statuses.every(
+            (t) => t && (t.status === "completed" || t.status === "failed"),
+          );
         if (allDone) {
           setPollingTaskIds([]);
           setUploadResults([]);
-          await fetchKb();
           showToast("文档处理完成", "success");
         }
       } catch {
@@ -254,7 +326,7 @@ export default function KnowledgeBaseDetailPage() {
       const data = await knowledgeBaseApi.testRetrieval({
         query: query.trim(),
         kb_id: Number(id),
-        top_k: topK,
+        top_k: parseTopK(topKInput),
       });
       setRetrievalResults(data.results);
     } catch (err) {
@@ -276,7 +348,7 @@ export default function KnowledgeBaseDetailPage() {
     return (
       <div className="max-w-3xl mx-auto">
         <Link
-          href="/dashboard/knowledge-base"
+          href={PATH.knowledgeBase}
           className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1 mb-4"
         >
           <ArrowLeftIcon className="w-4 h-4" />
@@ -290,12 +362,13 @@ export default function KnowledgeBaseDetailPage() {
   }
 
   const pendingUploads = uploadResults.filter((r) => !r.skip_processing);
-  const isPolling = pollingTaskIds.length > 0;
+  const isPolling =
+    pollingTaskIds.length > 0 || (kb.pending_upload_tasks?.length ?? 0) > 0;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <Link
-        href="/dashboard/knowledge-base"
+        href={PATH.knowledgeBase}
         className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1"
       >
         <ArrowLeftIcon className="w-4 h-4" />
@@ -311,7 +384,7 @@ export default function KnowledgeBaseDetailPage() {
             </p>
           </div>
           <Link
-            href={`/dashboard/knowledge-base/${kb.id}/edit`}
+            href={PATH.knowledgeBaseEdit(kb.id)}
             className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 border border-blue-200 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"
           >
             <EditIcon className="w-4 h-4" />
@@ -408,35 +481,43 @@ export default function KnowledgeBaseDetailPage() {
             {pendingUploads.length > 0 && (
               <>
                 <div className="mt-3 p-3 bg-gray-50 rounded-xl space-y-3">
-                  <h4 className="text-xs font-medium text-gray-600 uppercase tracking-wide">
-                    分块参数
-                  </h4>
+                  <div>
+                    <h4 className="text-xs font-medium text-gray-600 tracking-wide">
+                      分块参数（仅影响预览）
+                    </h4>
+                    <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                      不填则采用系统默认：块大小 {DEFAULT_CHUNK_SIZE} 字符、重叠{" "}
+                      {DEFAULT_CHUNK_OVERLAP} 字符（与向量化处理默认一致）。实际入库处理由服务端配置决定。
+                    </p>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">
-                        块大小 (chunk_size)
+                      <label className="block text-xs text-gray-600 mb-1">
+                        每块最大字符数
                       </label>
                       <input
-                        type="number"
-                        value={chunkSize}
-                        onChange={(e) => setChunkSize(Number(e.target.value))}
-                        min={100}
-                        max={10000}
-                        step={100}
+                        type="text"
+                        inputMode="numeric"
+                        value={chunkSizeInput}
+                        onChange={(e) =>
+                          setChunkSizeInput(e.target.value.replace(/\D/g, ""))
+                        }
+                        placeholder={`默认 ${DEFAULT_CHUNK_SIZE}`}
                         className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">
-                        重叠大小 (chunk_overlap)
+                      <label className="block text-xs text-gray-600 mb-1">
+                        块之间重叠字符数
                       </label>
                       <input
-                        type="number"
-                        value={chunkOverlap}
-                        onChange={(e) => setChunkOverlap(Number(e.target.value))}
-                        min={0}
-                        max={chunkSize}
-                        step={50}
+                        type="text"
+                        inputMode="numeric"
+                        value={chunkOverlapInput}
+                        onChange={(e) =>
+                          setChunkOverlapInput(e.target.value.replace(/\D/g, ""))
+                        }
+                        placeholder={`默认 ${DEFAULT_CHUNK_OVERLAP}`}
                         className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
@@ -550,75 +631,140 @@ export default function KnowledgeBaseDetailPage() {
         )}
 
         {isPolling && (
-          <div className="mt-4 space-y-2">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-              <h3 className="text-sm font-medium text-blue-700">
-                正在处理文档...
-              </h3>
-            </div>
-            {Object.entries(taskMap).map(([taskId, task]) => (
-              <div
-                key={taskId}
-                className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg text-sm"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <FileIcon className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  <span className="text-gray-700 truncate">
-                    {task.file_name || `任务 #${taskId}`}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <StatusBadge status={task.status} />
-                  {task.error_message && (
-                    <span className="text-xs text-red-500 max-w-[200px] truncate">
-                      {task.error_message}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
+          <div className="mt-4 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2.5 text-sm text-blue-800">
+            <div
+              className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0"
+              aria-hidden
+            />
+            <span>
+              正在处理文档，各文件状态与错误信息请查看下方「文档列表」。
+            </span>
           </div>
         )}
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          文档列表
-          <span className="text-sm font-normal text-gray-500 ml-2">
-            ({kb.documents.length} 个文档)
-          </span>
-        </h2>
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+          <h2 className="text-lg font-semibold text-gray-800">
+            文档列表
+            <span className="text-sm font-normal text-gray-500 ml-2">
+              ({kb.documents.length} 个文档)
+            </span>
+          </h2>
+          {kb.documents.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedDocIds(kb.documents.map((d) => d.id))
+                }
+                className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+              >
+                全选
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedDocIds([])}
+                disabled={selectedDocIds.length === 0}
+                className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
+              >
+                取消选择
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmBatchDelete(true)}
+                disabled={selectedDocIds.length === 0}
+                className="text-xs text-red-600 hover:text-red-700 px-2 py-1 rounded border border-red-200 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                批量删除 ({selectedDocIds.length})
+              </button>
+            </div>
+          )}
+        </div>
 
-        {kb.documents.length === 0 ? (
+        {kb.documents.length === 0 &&
+        !(kb.pending_upload_tasks && kb.pending_upload_tasks.length > 0) ? (
           <div className="text-center py-8 text-gray-400 text-sm">
             暂无文档，请先上传文件
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
+            {(kb.pending_upload_tasks ?? []).map((t) => (
+              <div
+                key={`pending-${t.task_id}`}
+                className="py-3 flex items-center justify-between gap-4 -mx-2 px-2 rounded-lg bg-amber-50/50 border border-amber-100/80"
+              >
+                <div className="flex-1 flex items-center gap-3 min-w-0">
+                  <FileIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">
+                      {t.file_name}
+                    </p>
+                    <p className="text-xs text-amber-700/90">
+                      正在入库与向量化…
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <StatusBadge status={t.status} />
+                  <span className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              </div>
+            ))}
             {kb.documents.map((doc: DocumentItem) => {
-              const lastTask =
-                doc.processing_tasks[doc.processing_tasks.length - 1];
+              const lastTask = getLatestProcessingTask(doc);
+              const busy = isDocumentProcessing(doc);
+              const rowMain = (
+                <>
+                  <FileIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">
+                      {doc.file_name}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {formatFileSize(doc.file_size)} &middot;{" "}
+                      {new Date(doc.created_at).toLocaleString("zh-CN")}
+                    </p>
+                  </div>
+                </>
+              );
               return (
                 <div
                   key={doc.id}
-                  className="py-3 flex items-center justify-between gap-4 hover:bg-gray-50 -mx-2 px-2 rounded-lg transition-colors group"
+                  className={`py-3 flex items-center justify-between gap-4 -mx-2 px-2 rounded-lg transition-colors ${
+                    busy
+                      ? "bg-amber-50/50 border border-amber-100/80"
+                      : "hover:bg-gray-50 group"
+                  }`}
                 >
-                  <Link
-                    href={`/dashboard/knowledge-base/${kb.id}/documents/${doc.id}`}
-                    className="flex-1 flex items-center gap-3 min-w-0"
-                  >
-                    <FileIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-800 truncate">
-                        {doc.file_name}
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        {formatFileSize(doc.file_size)} &middot;{" "}
-                        {new Date(doc.created_at).toLocaleString("zh-CN")}
-                      </p>
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0"
+                    checked={selectedDocIds.includes(doc.id)}
+                    onChange={() =>
+                      setSelectedDocIds((prev) =>
+                        prev.includes(doc.id)
+                          ? prev.filter((x) => x !== doc.id)
+                          : [...prev, doc.id],
+                      )
+                    }
+                    aria-label={`选择 ${doc.file_name}`}
+                  />
+                  {busy ? (
+                    <div
+                      className="flex-1 flex items-center gap-3 min-w-0 cursor-not-allowed"
+                      title="处理完成后可查看详情"
+                    >
+                      {rowMain}
                     </div>
-                  </Link>
+                  ) : (
+                    <Link
+                      href={PATH.documentDetail(kb.id, doc.id)}
+                      className="flex-1 flex items-center gap-3 min-w-0"
+                    >
+                      {rowMain}
+                    </Link>
+                  )}
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {lastTask && <StatusBadge status={lastTask.status} />}
                     <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded hidden sm:inline-block">
@@ -636,12 +782,22 @@ export default function KnowledgeBaseDetailPage() {
                     >
                       <TrashIcon className="w-4 h-4" />
                     </button>
-                    <Link
-                      href={`/dashboard/knowledge-base/${kb.id}/documents/${doc.id}`}
-                      className="p-1 text-gray-300 hover:text-gray-500"
-                    >
-                      <ChevronRightIcon className="w-4 h-4" />
-                    </Link>
+                    {busy ? (
+                      <span
+                        className="p-1 text-amber-500/80"
+                        title="处理中"
+                        aria-hidden
+                      >
+                        <ChevronRightIcon className="w-4 h-4 opacity-40" />
+                      </span>
+                    ) : (
+                      <Link
+                        href={PATH.documentDetail(kb.id, doc.id)}
+                        className="p-1 text-gray-300 hover:text-gray-500"
+                      >
+                        <ChevronRightIcon className="w-4 h-4" />
+                      </Link>
+                    )}
                   </div>
                 </div>
               );
@@ -661,21 +817,25 @@ export default function KnowledgeBaseDetailPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleRetrieval()}
-              placeholder="输入查询语句..."
+              placeholder="输入要向量检索的问题或关键词…"
               className="flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <div className="flex gap-2">
-              <select
-                value={topK}
-                onChange={(e) => setTopK(Number(e.target.value))}
-                className="border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                {[3, 5, 10, 15, 20].map((n) => (
-                  <option key={n} value={n}>
-                    Top {n}
-                  </option>
-                ))}
-              </select>
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] text-gray-500 whitespace-nowrap">
+                返回条数
+              </label>
+              <div className="flex gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={topKInput}
+                onChange={(e) =>
+                  setTopKInput(e.target.value.replace(/\D/g, ""))
+                }
+                placeholder={`默认 ${DEFAULT_TOP_K}`}
+                title={`留空则使用 ${DEFAULT_TOP_K} 条`}
+                className="w-[5.5rem] border border-gray-300 rounded-lg px-2 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
               <button
                 onClick={handleRetrieval}
                 disabled={retrieving || !query.trim()}
@@ -683,8 +843,12 @@ export default function KnowledgeBaseDetailPage() {
               >
                 {retrieving ? "检索中..." : "检索"}
               </button>
+              </div>
             </div>
           </div>
+          <p className="text-[11px] text-gray-500 mt-2">
+            返回条数留空则取前 {DEFAULT_TOP_K} 条最相关片段（与评估/对话检索默认习惯一致，可填 1–50）。
+          </p>
 
           {retrievalError && (
             <div className="mt-3 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
@@ -740,6 +904,17 @@ export default function KnowledgeBaseDetailPage() {
         loading={deletingDoc !== null}
         onConfirm={handleDeleteDocument}
         onCancel={() => setConfirmDeleteDoc(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmBatchDelete}
+        title="批量删除文档"
+        description={`确定删除已选中的 ${selectedDocIds.length} 个文档吗？此操作不可恢复，向量索引与文件将被清除。`}
+        confirmText="删除"
+        variant="danger"
+        loading={batchDeleting}
+        onConfirm={handleBatchDeleteDocuments}
+        onCancel={() => setConfirmBatchDelete(false)}
       />
 
       <Toast

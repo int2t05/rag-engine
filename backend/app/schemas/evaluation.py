@@ -17,6 +17,24 @@ class TestCaseCreate(BaseModel):
     reference: Optional[str] = None
 
 
+class TestCaseBatchImport(BaseModel):
+    """从 JSON 批量导入的测试用例列表（与创建任务时单条结构一致）"""
+
+    test_cases: List[TestCaseCreate] = Field(
+        ...,
+        min_length=1,
+        description="至少一条；空问题会在服务端跳过",
+    )
+
+
+class TestCaseBatchImportResult(BaseModel):
+    """批量导入结果"""
+
+    task_id: int
+    imported: int
+    skipped: int
+
+
 class TestCaseResponse(BaseModel):
     """评估测试用例响应"""
 
@@ -39,6 +57,10 @@ class EvaluationTaskCreate(BaseModel):
         default="full",
         description="full=完整评估 | retrieval=仅检索 | generation=仅生成",
     )
+    evaluation_metrics: Optional[List[str]] = Field(
+        default=None,
+        description="可选，指定一个或多个指标；不传则按 evaluation_type 默认集合",
+    )
     test_cases: List[TestCaseCreate]
 
 
@@ -51,6 +73,7 @@ class EvaluationTaskResponse(BaseModel):
     knowledge_base_id: Optional[int]
     top_k: int
     evaluation_type: str
+    evaluation_metrics: Optional[List[str]] = None
     status: str
     error_message: Optional[str]
     summary: Optional[dict]

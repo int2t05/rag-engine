@@ -7,6 +7,8 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { evaluationApi, EvaluationTask, ApiError } from "@/lib/api";
+import { formatMetricsChips } from "@/lib/evaluation-metrics";
+import { PATH } from "@/lib/routes";
 import { PlusIcon, ChartBarIcon } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Toast } from "@/components/Toast";
@@ -94,7 +96,7 @@ export default function EvaluationPage() {
           </p>
         </div>
         <Link
-          href="/dashboard/evaluation/new"
+          href={PATH.evaluationNew}
           className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
         >
           <PlusIcon className="w-4 h-4" />
@@ -120,7 +122,7 @@ export default function EvaluationPage() {
             创建评估任务，添加测试用例，对知识库进行 RAG 质量评估
           </p>
           <Link
-            href="/dashboard/evaluation/new"
+            href={PATH.evaluationNew}
             className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
           >
             <PlusIcon className="w-4 h-4" />
@@ -136,7 +138,7 @@ export default function EvaluationPage() {
             >
               <div className="flex items-start justify-between mb-3">
                 <Link
-                  href={`/dashboard/evaluation/${task.id}`}
+                  href={PATH.evaluationDetail(task.id)}
                   className="text-base font-semibold text-gray-800 hover:text-blue-600 transition-colors line-clamp-1"
                 >
                   {task.name}
@@ -152,13 +154,30 @@ export default function EvaluationPage() {
               <p className="text-sm text-gray-500 mb-3 line-clamp-2 min-h-[2.5rem]">
                 {task.description || "暂无描述"}
               </p>
-              <div className="flex items-center gap-2 text-xs text-gray-400 mb-4">
+              <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
                 <span>Top-K: {task.top_k}</span>
                 <span>类型: {task.evaluation_type}</span>
               </div>
+              <p
+                className={`text-xs mb-4 line-clamp-2 ${
+                  task.evaluation_metrics?.length
+                    ? "text-slate-600"
+                    : "text-gray-400"
+                }`}
+                title={
+                  task.evaluation_metrics?.length
+                    ? formatMetricsChips(task.evaluation_metrics)
+                    : undefined
+                }
+              >
+                指标:{" "}
+                {task.evaluation_metrics?.length
+                  ? formatMetricsChips(task.evaluation_metrics)
+                  : "类型默认"}
+              </p>
               <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
                 <Link
-                  href={`/dashboard/evaluation/${task.id}`}
+                  href={PATH.evaluationDetail(task.id)}
                   className="flex-1 text-center py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                 >
                   详情

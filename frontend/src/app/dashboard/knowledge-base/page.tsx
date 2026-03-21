@@ -14,6 +14,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { knowledgeBaseApi, KnowledgeBase, ApiError } from "@/lib/api";
+import { PATH } from "@/lib/routes";
 import { PlusIcon, BookIcon, FileIcon } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Toast } from "@/components/Toast";
@@ -111,7 +112,7 @@ export default function KnowledgeBasePage() {
           </p>
         </div>
         <Link
-          href="/dashboard/knowledge-base/new"
+          href={PATH.knowledgeBaseNew}
           className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
         >
           <PlusIcon className="w-4 h-4" />
@@ -139,7 +140,7 @@ export default function KnowledgeBasePage() {
             创建你的第一个知识库，开始上传文档并进行问答
           </p>
           <Link
-            href="/dashboard/knowledge-base/new"
+            href={PATH.knowledgeBaseNew}
             className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
           >
             <PlusIcon className="w-4 h-4" />
@@ -157,7 +158,7 @@ export default function KnowledgeBasePage() {
               {/* 标题 */}
               <div className="flex items-start justify-between mb-3">
                 <Link
-                  href={`/dashboard/knowledge-base/${kb.id}`}
+                  href={PATH.knowledgeBaseDetail(kb.id)}
                   className="text-base font-semibold text-gray-800 hover:text-blue-600 transition-colors line-clamp-1"
                 >
                   {kb.name}
@@ -183,13 +184,13 @@ export default function KnowledgeBasePage() {
               {/* 操作按钮 */}
               <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
                 <Link
-                  href={`/dashboard/knowledge-base/${kb.id}`}
+                  href={PATH.knowledgeBaseDetail(kb.id)}
                   className="flex-1 text-center py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                 >
                   详情
                 </Link>
                 <Link
-                  href={`/dashboard/knowledge-base/${kb.id}/edit`}
+                  href={PATH.knowledgeBaseEdit(kb.id)}
                   className="flex-1 text-center py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                   编辑

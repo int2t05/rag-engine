@@ -20,6 +20,14 @@ interface ChatListProps {
   onNewChat: () => void;
   /** 是否正在加载 */
   loading?: boolean;
+  /** 多选：已选中的对话 ID */
+  selectedIds?: number[];
+  /** 多选：切换选中 */
+  onToggleSelect?: (chat: Chat) => void;
+  /** 多选：全选当前列表 */
+  onSelectAll?: () => void;
+  /** 多选：打开批量删除确认 */
+  onBatchDelete?: () => void;
 }
 
 /**
@@ -32,7 +40,13 @@ export function ChatList({
   onDeleteChat,
   onNewChat,
   loading = false,
+  selectedIds = [],
+  onToggleSelect,
+  onSelectAll,
+  onBatchDelete,
 }: ChatListProps) {
+  const selectionEnabled = Boolean(onToggleSelect && onSelectAll && onBatchDelete);
+
   return (
     <>
       {/* 新建对话按钮 */}
@@ -45,6 +59,26 @@ export function ChatList({
           新建对话
         </button>
       </div>
+
+      {selectionEnabled && chats.length > 0 && (
+        <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onSelectAll}
+            className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+          >
+            全选
+          </button>
+          <button
+            type="button"
+            onClick={onBatchDelete}
+            disabled={selectedIds.length === 0}
+            className="text-xs text-red-600 hover:text-red-700 px-2 py-1 rounded border border-red-200 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            批量删除 ({selectedIds.length})
+          </button>
+        </div>
+      )}
 
       {/* 对话列表 */}
       <div className="flex-1 overflow-y-auto scrollbar-thin">
@@ -69,9 +103,24 @@ export function ChatList({
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium truncate flex-1">
-                    {chat.title}
-                  </span>
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    {selectionEnabled && (
+                      <input
+                        type="checkbox"
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0"
+                        checked={selectedIds.includes(chat.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          onToggleSelect?.(chat);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`选择 ${chat.title}`}
+                      />
+                    )}
+                    <span className="text-sm font-medium truncate flex-1">
+                      {chat.title}
+                    </span>
+                  </div>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();

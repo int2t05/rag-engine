@@ -7,8 +7,12 @@
 1. upload_document：上传到 MinIO（内部用）
 2. preview_document：从 MinIO 拉取文件，解析并分块，返回预览
 3. process_document_background：后台任务，解析→分块→向量化→写入向量库和 MySQL
+
+注意：解析/向量化等为同步阻塞调用，必须通过 asyncio.to_thread 放到线程池执行，
+否则会占满事件循环导致整站 API 无响应。
 """
 
+import asyncio
 import logging
 import os
 import hashlib
@@ -25,7 +29,7 @@ from langchain_community.document_loaders import (
     UnstructuredMarkdownLoader,
     TextLoader,
 )
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document as LangchainDocument
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -149,11 +153,14 @@ async def process_document(
             doc = LangchainDocument(page_content=chunk.content, metadata=metadata)
             documents_to_update.append(doc)
 
-        # 向数据库和矢量存储添加新块
+        # 向数据库和矢量存储添加新块（向量点 id 与 document_chunks.id 一致，便于删除文档时按 id 清理）
         if new_chunks:
             logger.info(f"添加{len(new_chunks)}个新的/更新的块")
             chunk_manager.add_chunks(new_chunks)
-            vector_store.add_documents(documents_to_update)
+            vector_store.add_documents(
+                documents_to_update,
+                ids=[c["id"] for c in new_chunks],
+            )
 
         # 删除移动的数据块
         chunks_to_delete = chunk_manager.get_deleted_chunks(current_hashes, file_name)
@@ -274,7 +281,7 @@ async def preview_document(
         os.unlink(temp_path)
 
 
-async def process_document_background(
+def _process_document_background_sync(
     temp_path: str,
     file_name: str,
     kb_id: int,
@@ -284,7 +291,7 @@ async def process_document_background(
     chunk_overlap: int = 200,
 ) -> None:
     """
-    后台文档处理主流程（新上传文件）。
+    后台文档处理主流程（同步实现，在线程池中运行）。
 
     流程：
     1. 从 MinIO 临时目录下载文件
@@ -410,13 +417,20 @@ async def process_document_background(
             db.refresh(document)
             logger.info(f"任务{task_id}：使用ID {document.id}创建的文档记录")
 
+            # 立即关联任务与文档（此前仅在 completed 时写入 document_id，导致
+            # Document.processing_tasks 在处理阶段为空，知识库详情无法展示「处理中」）
+            task.document_id = document.id  # type: ignore
+            db.commit()
+
             # 6. 存储文档块
             logger.info(f"任务 {task_id}：存储文档块")
+            vector_chunk_ids: List[str] = []
             for i, chunk in enumerate(chunks):
                 # 为每个 chunk 生成唯一的 ID
                 chunk_id = hashlib.sha256(
                     f"{kb_id}:{file_name}:{chunk.page_content}".encode()
                 ).hexdigest()
+                vector_chunk_ids.append(chunk_id)
 
                 chunk.metadata["source"] = file_name
                 chunk.metadata["kb_id"] = kb_id
@@ -441,16 +455,15 @@ async def process_document_background(
                     logger.info(f"任务 {task_id}：存储{i}块")
                     db.commit()  # 每 100 条提交一次，避免事务太大
 
-            # 7. 添加到向量存储
+            # 7. 添加到向量存储（点 id 与 document_chunks.id 一致，删除文档时 _delete_document_core 才能删掉向量）
             logger.info(f"任务{task_id}：将块添加到向量存储")
-            vector_store.add_documents(chunks)
+            vector_store.add_documents(chunks, ids=vector_chunk_ids)
             # 移除 persist() 调用，因为新版本不需要
             logger.info(f"任务{task_id}：已将块添加到向量存储")
 
             # 8. 更新任务状态
             logger.info(f"任务{task_id}：正在将任务状态更新为completed")
             task.status = "completed"  # type: ignore
-            task.document_id = document.id  # 更新为新创建的文档ID
 
             # 9. 更新上传记录状态
             upload = task.document_upload  # 直接通过关系获取
@@ -491,3 +504,25 @@ async def process_document_background(
         # 如果创建了db会话，则关闭
         if should_close_db and db:
             db.close()
+
+
+async def process_document_background(
+    temp_path: str,
+    file_name: str,
+    kb_id: int,
+    task_id: int,
+    db: Session = None,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+) -> None:
+    """在线程池中执行重 CPU/IO 的同步处理，避免阻塞 asyncio 事件循环。"""
+    await asyncio.to_thread(
+        _process_document_background_sync,
+        temp_path,
+        file_name,
+        kb_id,
+        task_id,
+        db,
+        chunk_size,
+        chunk_overlap,
+    )

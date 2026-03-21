@@ -6,6 +6,7 @@
 """
 
 from typing import List, Any
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
@@ -24,6 +25,14 @@ from app.core.security import get_current_user
 from app.services.chat_service import generate_response
 
 router = APIRouter()
+
+_BATCH_DELETE_CHATS_MAX = 100
+
+
+class BatchDeleteChatsRequest(BaseModel):
+    """批量删除对话请求体"""
+
+    chat_ids: List[int]
 
 
 @router.post("", response_model=ChatResponse)
@@ -76,6 +85,40 @@ def get_chats(
         .all()
     )
     return chats
+
+
+@router.post("/batch-delete")
+def batch_delete_chats(
+    *,
+    db: Session = Depends(get_db),
+    body: BatchDeleteChatsRequest,
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    批量删除对话（仅当前用户拥有的）；级联删除消息。
+    """
+    raw_ids = list(dict.fromkeys(body.chat_ids))
+    ids = [i for i in raw_ids if i > 0]
+    if not ids:
+        raise HTTPException(status_code=400, detail="请提供至少一个有效的 chat_id")
+    if len(ids) > _BATCH_DELETE_CHATS_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"单次最多删除 {_BATCH_DELETE_CHATS_MAX} 个对话",
+        )
+
+    chats = (
+        db.query(Chat)
+        .filter(Chat.id.in_(ids), Chat.user_id == current_user.id)
+        .all()
+    )
+    deleted_ids = [c.id for c in chats]
+    for c in chats:
+        db.delete(c)
+    db.commit()
+
+    not_found = [i for i in ids if i not in deleted_ids]
+    return {"deleted": deleted_ids, "not_found": not_found}
 
 
 @router.get("/{chat_id}", response_model=ChatResponse)
@@ -140,6 +183,11 @@ async def create_message(
     return StreamingResponse(
         response_stream(),
         media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
