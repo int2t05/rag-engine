@@ -11,10 +11,11 @@ from app.shared.ai_runtime_context import reset_ai_runtime_token, set_ai_runtime
 from app.shared.ai_runtime_loader import load_ai_runtime_for_user
 
 
+# 全局状态管理器
 @contextmanager
 def ai_runtime_scope(db: Session, user_id: int) -> Generator[None, None, None]:
     rt = load_ai_runtime_for_user(db, user_id)
-    tok = set_ai_runtime_token(rt)
+    tok = set_ai_runtime_token(rt)  # 记录"设置之前是什么"的标记，用于恢复
     try:
         yield
     finally:

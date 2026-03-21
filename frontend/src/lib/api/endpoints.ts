@@ -23,6 +23,7 @@ import type {
   LlmEmbeddingConfigItem,
   LlmEmbeddingConfigListResponse,
   PreviewResult,
+  ReplaceDocumentResult,
   RetrievalResult,
   TaskStatus,
   UploadResult,
@@ -69,6 +70,28 @@ export const knowledgeBaseApi = {
 
   getDocument: (kbId: number, docId: number) =>
     api.get<DocumentItem>(`/api/knowledge-base/${kbId}/documents/${docId}`),
+
+  /**
+   * 同名重新上传已入库文档，FormData 字段名 `file`；
+   * `chunk_size` / `chunk_overlap` 以 Query 传递（与后端 `replace_document_endpoint` 一致）。
+   */
+  replaceDocument: (
+    kbId: number,
+    docId: number,
+    file: File,
+    chunkParams: { chunk_size: number; chunk_overlap: number },
+  ) => {
+    const form = new FormData();
+    form.append("file", file);
+    const q = new URLSearchParams({
+      chunk_size: String(chunkParams.chunk_size),
+      chunk_overlap: String(chunkParams.chunk_overlap),
+    });
+    return api.post<ReplaceDocumentResult>(
+      `/api/knowledge-base/${kbId}/documents/${docId}/replace?${q}`,
+      form,
+    );
+  },
 
   deleteDocument: (kbId: number, docId: number) =>
     api.delete<{ message: string; doc_id: number }>(

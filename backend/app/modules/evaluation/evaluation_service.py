@@ -1,7 +1,8 @@
 """
-RAG 评估执行服务（对应《RAG评估业务流程最佳实践》第二节 Step 4）
-
-每条用例：检索 → 生成 → RAGAS 打分 → 落库；阈值见 ``PASS_THRESHOLD``（与文档核心指标 0.6 一致）。
+RAG 评估执行服务
+================
+每条用例：1. 检索 → 2. 生成 → 3. RAGAS 打分 → 4. 落库。
+PASS_THRESHOLD：汇总是否通过的门槛（默认 0.6）。
 """
 
 import asyncio
@@ -46,7 +47,7 @@ try:
 except ImportError as e:
     _RAGAS_IMPORT_ERROR = str(e)
 
-# 通过阈值（文档定义）
+# 与 RAGAS 分数字段一起用于判断是否「通过」
 PASS_THRESHOLD = 0.6
 
 

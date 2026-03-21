@@ -14,6 +14,7 @@ from app.modules.knowledge.document_service import (
     get_document_detail,
     get_processing_tasks_status,
     preview_kb_documents,
+    replace_kb_document,
     submit_document_processing,
     upload_kb_documents,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "kb_similarity_search",
     "list_knowledge_bases",
     "preview_kb_documents",
+    "replace_kb_document",
     "submit_document_processing",
     "update_knowledge_base",
     "upload_kb_documents",

@@ -12,6 +12,7 @@ _ai_runtime_var: ContextVar[Optional[AiRuntimeSettings]] = ContextVar(
 )
 
 
+# ContextVar：每个请求/任务有独立的值，互不干扰
 def get_ai_runtime() -> AiRuntimeSettings:
     v = _ai_runtime_var.get()
     if v is None:

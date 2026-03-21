@@ -28,6 +28,7 @@ import { Toast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   formatFileSize,
+  getDisplayProcessingTask,
   getLatestProcessingTask,
   isDocumentProcessing,
 } from "@/lib/utils";
@@ -602,6 +603,7 @@ export default function KnowledgeBaseDetailPage() {
             ))}
             {kb.documents.map((doc: DocumentItem) => {
               const lastTask = getLatestProcessingTask(doc);
+              const displayTask = getDisplayProcessingTask(doc);
               const busy = isDocumentProcessing(doc);
               const rowMain = (
                 <>
@@ -655,7 +657,7 @@ export default function KnowledgeBaseDetailPage() {
                     </Link>
                   )}
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {lastTask && <StatusBadge status={lastTask.status} />}
+                    {displayTask && <StatusBadge status={displayTask.status} />}
                     <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded hidden sm:inline-block">
                       {doc.content_type}
                     </span>

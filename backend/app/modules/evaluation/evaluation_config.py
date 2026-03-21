@@ -1,15 +1,10 @@
 """
 RAG 评估：类型与指标映射
 ========================
-与《docs/RAG评估业务流程最佳实践.md》第三节一致；LLM/Embedding 环境变量见该文档第四节。
-
-| 类型 | 内容 | 场景 |
-|------|------|------|
-| full | 检索 + 生成 + 全指标 | 默认全流程 |
-| retrieval | 检索 + 检索侧指标 | 调检索 |
-| generation | 检索 + 生成 + 生成侧指标 | 调生成（仍要检索上下文） |
-
-若请求体带 ``evaluation_metrics``，则只算列出的指标（须为 ``ALLOWED_METRICS`` 子集）。
+1. full：检索 + 生成 + 全量指标
+2. retrieval：只关心检索侧指标
+3. generation：检索 + 生成 + 生成侧指标（仍需上下文）
+若请求带 evaluation_metrics：只算其中子集（须属于 ALLOWED_METRICS）。
 """
 
 from typing import List, Literal, Optional, Tuple

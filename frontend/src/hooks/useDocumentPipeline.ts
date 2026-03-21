@@ -5,6 +5,7 @@
  * - POST /api/knowledge-base/{kbId}/documents/preview
  * - POST /api/knowledge-base/{kbId}/documents/process
  * - GET  /api/knowledge-base/{kbId}/documents/tasks?task_ids=
+ * 已入库文档同名替换在文档详情页调用 knowledgeBaseApi.replaceDocument（含分块 Query），不在本 hook 内。
  * 轮询间隔 3s，全部 completed/failed 后清空 uploadResults 并 toast。
  */
 

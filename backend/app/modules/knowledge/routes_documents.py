@@ -39,6 +39,7 @@ from app.modules.knowledge import (
     get_processing_tasks_status,
     kb_similarity_search,
     preview_kb_documents,
+    replace_kb_document,
     submit_document_processing,
     upload_kb_documents,
 )
@@ -129,6 +130,45 @@ async def get_processing_tasks_endpoint(
         )
     except ResourceNotFoundError as e:
         raise HTTPException(status_code=404, detail=e.detail) from e
+
+
+@router.post("/{kb_id}/documents/{doc_id}/replace")
+async def replace_document_endpoint(
+    kb_id: int,
+    doc_id: int,
+    file: UploadFile,
+    chunk_size: int = Query(
+        1000,
+        ge=1,
+        le=500_000,
+        description="分块最大字符数",
+    ),
+    chunk_overlap: int = Query(
+        200,
+        ge=0,
+        le=500_000,
+        description="分块重叠字符数",
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
+):
+    """同名重新上传已入库文档，覆盖 MinIO 并增量更新向量（process_document）。"""
+    del _rt  # 依赖用于保证已配置模型；process_document 内再加载运行时
+    try:
+        return await replace_kb_document(
+            db,
+            current_user.id,
+            kb_id,
+            doc_id,
+            file,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+    except ResourceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=e.detail) from e
+    except BadRequestError as e:
+        raise HTTPException(status_code=400, detail=e.detail) from e
 
 
 @router.get("/{kb_id}/documents/{doc_id}", response_model=DocumentResponse)

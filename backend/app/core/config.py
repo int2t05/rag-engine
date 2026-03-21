@@ -49,7 +49,7 @@ class Settings(BaseSettings):
             f"@{self.MYSQL_SERVER}:{self.MYSQL_PORT}/{self.MYSQL_DATABASE}"
         )
 
-    # ---------- JWT 认证（《用户认证业务流程最佳实践》5.1 节）----------
+    # ---------- JWT：登录签发 / 受保护路由校验 ----------
     SECRET_KEY: str = Field(
         default="change-me", alias="SECRET_KEY"
     )  # JWT 签名密钥，生产环境必须修改为随机长字符串

@@ -15,6 +15,24 @@ export function getLatestProcessingTask(doc: DocumentItem): ProcessingTask | nul
 }
 
 /**
+ * 用于界面展示状态：有任务则取最新一条；无任务时（历史数据或任务被误删）
+ * 对已入库文档仍视为「已完成」，避免列表不显示状态标签。
+ */
+export function getDisplayProcessingTask(doc: DocumentItem): ProcessingTask | null {
+  const last = getLatestProcessingTask(doc);
+  if (last) return last;
+  return {
+    id: -1,
+    status: "completed",
+    error_message: null,
+    document_id: doc.id,
+    knowledge_base_id: doc.knowledge_base_id,
+    created_at: doc.updated_at,
+    updated_at: doc.updated_at,
+  };
+}
+
+/**
  * 文档是否仍处于处理队列中（不可查看完整详情页）
  */
 export function isDocumentProcessing(doc: DocumentItem): boolean {

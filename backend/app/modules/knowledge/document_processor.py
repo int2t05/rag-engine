@@ -123,30 +123,25 @@ async def process_document(
         documents_to_update = []
 
         for chunk in preview_result.chunks:
-            # 计算块哈希值
+            # 与 _process_document_background_sync 一致：先算 chunk_id、再写 metadata、再算 hash
+            chunk_id = hashlib.sha256(
+                f"{kb_id}:{file_name}:{chunk.content}".encode()
+            ).hexdigest()
+            meta = dict(chunk.metadata) if chunk.metadata else {}
+            meta["source"] = file_name
+            meta["kb_id"] = kb_id
+            meta["document_id"] = document_id
+            meta["chunk_id"] = chunk_id
             chunk_hash = hashlib.sha256(
-                (chunk.content + str(chunk.metadata)).encode()
+                (chunk.content + str(meta)).encode()
             ).hexdigest()
             current_hashes.add(chunk_hash)
 
-            # 如果块未更改，则跳过
             if chunk_hash in existing_hashes:
                 continue
 
-            # 为块创建唯一的ID
-            chunk_id = hashlib.sha256(
-                f"{kb_id}:{file_name}:{chunk_hash}".encode()
-            ).hexdigest()
-
-            # 准备块记录
-            # 准备元数据
-            metadata = {
-                **chunk.metadata,  # 字典解包运算符**
-                "chunk_id": chunk_id,
-                "file_name": file_name,
-                "kb_id": kb_id,
-                "document_id": document_id,
-            }
+            # chunk_metadata 与全量入库一致：page_content + 扩充后的 metadata
+            chunk_metadata = {"page_content": chunk.content, **meta}
 
             new_chunks.append(
                 {
@@ -154,13 +149,12 @@ async def process_document(
                     "kb_id": kb_id,
                     "document_id": document_id,
                     "file_name": file_name,
-                    "metadata": metadata,
+                    "metadata": chunk_metadata,
                     "hash": chunk_hash,
                 }
             )
 
-            # 为向量存储准备文档
-            doc = LangchainDocument(page_content=chunk.content, metadata=metadata)
+            doc = LangchainDocument(page_content=chunk.content, metadata=meta)
             documents_to_update.append(doc)
 
         # 向数据库和矢量存储添加新块（向量点 id 与 document_chunks.id 一致，便于删除文档时按 id 清理）

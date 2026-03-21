@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import List, Optional, Sequence
 
 from sqlalchemy import delete, func
@@ -161,26 +160,31 @@ class KnowledgeRepository:
         self.db.add_all(tasks)
 
     def list_running_upload_ids_subquery(self):
-        """存在 pending/processing 任务的上传 ID 子查询（清理临时文件时排除）。"""
+        """
+        清理时勿删的上传 ID：仅当「上传记录仍为 pending」且任务仍在 pending/processing。
+        已 completed 或任务已失败/结束的不在此列。
+        """
         return (
             self.db.query(ProcessingTask.document_upload_id)
+            .join(
+                DocumentUpload,
+                ProcessingTask.document_upload_id == DocumentUpload.id,
+            )
             .filter(
                 ProcessingTask.document_upload_id.isnot(None),
                 ProcessingTask.status.in_(["pending", "processing"]),
+                DocumentUpload.status == "pending",
             )
             .distinct()
         )
 
-    def list_stale_uploads(
-        self, cutoff: datetime, running_upload_ids_subq
+    def list_uploads_eligible_for_cleanup(
+        self, protected_upload_ids_subq
     ) -> List[DocumentUpload]:
-        """早于 cutoff 且不在运行任务中的上传记录。"""
+        """不在「pending 上传 + 仍 pending/processing 任务」保护集内的上传（可清理）。"""
         return (
             self.db.query(DocumentUpload)
-            .filter(
-                DocumentUpload.created_at < cutoff,
-                ~DocumentUpload.id.in_(running_upload_ids_subq),
-            )
+            .filter(~DocumentUpload.id.in_(protected_upload_ids_subq))
             .all()
         )
 

@@ -61,6 +61,15 @@ export interface UploadResult {
   skip_processing: boolean;
 }
 
+/** POST .../documents/{docId}/replace 同名覆盖并增量更新向量 */
+export interface ReplaceDocumentResult {
+  document_id: number;
+  file_name: string;
+  file_hash: string;
+  file_size: number;
+  message: string;
+}
+
 export interface TaskStatus {
   document_id: number | null;
   status: string;

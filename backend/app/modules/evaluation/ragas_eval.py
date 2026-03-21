@@ -1,7 +1,7 @@
 """
-RAGAS（collections）单样本评分：Strict JSON 提示词 + 项目内 LLM/Embeddings 工厂。
-
-模型来源与《RAG评估业务流程最佳实践》第四节相同：判分用 ``LLMFactory``，需向量时用 ``EmbeddingsFactory``。
+RAGAS（collections）单样本评分：Strict JSON 提示 + 工厂注入。
+1. 判分 LLM：LLMFactory
+2. 需要向量时：EmbeddingsFactory
 """
 
 from __future__ import annotations

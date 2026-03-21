@@ -4,13 +4,20 @@
  */
 
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { knowledgeBaseApi, DocumentItem, ApiError } from "@/lib/api";
+import {
+  DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_CHUNK_SIZE,
+  parseReplaceChunkOverlap,
+  parseReplaceChunkSize,
+} from "@/lib/form-defaults";
 import { PATH } from "@/lib/routes";
 import {
   formatFileSize,
+  getDisplayProcessingTask,
   getLatestProcessingTask,
   isDocumentProcessing,
 } from "@/lib/utils";
@@ -95,6 +102,10 @@ export default function DocumentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [replacing, setReplacing] = useState(false);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const [replaceChunkSizeInput, setReplaceChunkSizeInput] = useState("");
+  const [replaceChunkOverlapInput, setReplaceChunkOverlapInput] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [toast, setToast] = useState({
     msg: "",
@@ -139,6 +150,57 @@ export default function DocumentDetailPage() {
     return () => clearInterval(t);
   }, [doc, fetchDocument]);
 
+  const handleReplaceFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file || !doc) return;
+
+      const incoming = file.name.replace(/^.*[/\\]/, "");
+      if (incoming !== doc.file_name) {
+        showToastMsg(
+          `文件名须与当前文档一致（当前：${doc.file_name}，所选：${incoming}）`,
+          "error",
+        );
+        return;
+      }
+
+      const chunkSize = parseReplaceChunkSize(replaceChunkSizeInput);
+      const chunkOverlap = parseReplaceChunkOverlap(
+        replaceChunkOverlapInput,
+        chunkSize,
+      );
+
+      setReplacing(true);
+      try {
+        await knowledgeBaseApi.replaceDocument(
+          Number(kbId),
+          Number(docId),
+          file,
+          { chunk_size: chunkSize, chunk_overlap: chunkOverlap },
+        );
+        showToastMsg("文档已更新并重新向量化", "success");
+        await fetchDocument({ silent: true });
+      } catch (err) {
+        showToastMsg(
+          err instanceof ApiError ? err.message : "替换失败",
+          "error",
+        );
+      } finally {
+        setReplacing(false);
+      }
+    },
+    [
+      doc,
+      kbId,
+      docId,
+      fetchDocument,
+      showToastMsg,
+      replaceChunkSizeInput,
+      replaceChunkOverlapInput,
+    ],
+  );
+
   const handleDelete = useCallback(async () => {
     setDeleting(true);
     try {
@@ -179,6 +241,7 @@ export default function DocumentDetailPage() {
   }
 
   const lastTask = getLatestProcessingTask(doc);
+  const displayTask = getDisplayProcessingTask(doc);
 
   if (isDocumentProcessing(doc)) {
     return (
@@ -235,12 +298,28 @@ export default function DocumentDetailPage() {
               文档 ID: {doc.id}
             </p>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {lastTask && <StatusBadge status={lastTask.status} />}
+          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
+            {displayTask && <StatusBadge status={displayTask.status} />}
+            <input
+              ref={replaceInputRef}
+              type="file"
+              className="sr-only"
+              aria-hidden
+              onChange={handleReplaceFileChange}
+            />
+            <button
+              type="button"
+              onClick={() => replaceInputRef.current?.click()}
+              disabled={replacing || deleting}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-50 border border-blue-200 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <FileIcon className="w-4 h-4" />
+              {replacing ? "更新中..." : "替换文件"}
+            </button>
             <button
               type="button"
               onClick={() => setShowDeleteConfirm(true)}
-              disabled={deleting}
+              disabled={deleting || replacing}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 border border-red-200 rounded-lg transition-colors disabled:opacity-50"
             >
               <TrashIcon className="w-4 h-4" />
@@ -249,7 +328,51 @@ export default function DocumentDetailPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 border-t border-gray-100 pt-5">
+        <div className="border-t border-gray-100 pt-5 mt-5">
+          <h3 className="text-sm font-medium text-gray-800 mb-1">
+            替换文件时的分块参数
+          </h3>
+          <p className="text-xs text-gray-500 mb-3 leading-relaxed">
+            点击「替换文件」并选择同名文件时生效。留空则使用默认：每块{" "}
+            {DEFAULT_CHUNK_SIZE} 字符、重叠 {DEFAULT_CHUNK_OVERLAP} 字符。
+          </p>
+          <div className="grid grid-cols-2 gap-3 max-w-md">
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">
+                每块最大字符数
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={replaceChunkSizeInput}
+                onChange={(e) =>
+                  setReplaceChunkSizeInput(e.target.value.replace(/\D/g, ""))
+                }
+                placeholder={`默认 ${DEFAULT_CHUNK_SIZE}`}
+                disabled={replacing || deleting}
+                className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">
+                块之间重叠字符数
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={replaceChunkOverlapInput}
+                onChange={(e) =>
+                  setReplaceChunkOverlapInput(e.target.value.replace(/\D/g, ""))
+                }
+                placeholder={`默认 ${DEFAULT_CHUNK_OVERLAP}`}
+                disabled={replacing || deleting}
+                className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 border-t border-gray-100 pt-5 mt-5">
           <InfoItem label="文件大小" value={formatFileSize(doc.file_size)} />
           <InfoItem label="文件类型" value={doc.content_type} />
           <InfoItem

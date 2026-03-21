@@ -1,5 +1,7 @@
 .env
 __pycache__/
+*.py[cod]
+.mypy_cache/
 node_modules/
 .next/
 .venv/
@@ -7,3 +9,9 @@ venv/
 .claude/
 .cursor/
 .vscode/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/

@@ -18,11 +18,13 @@
 
 | 方法 | 端点 | 功能 |
 |------|------|------|
-| POST | `/api/llm-configs/` | 创建配置 |
-| GET | `/api/llm-configs/` | 配置列表 |
-| GET | `/api/llm-configs/{config_id}` | 配置详情 |
-| DELETE | `/api/llm-configs/{config_id}` | 删除配置 |
+| GET | `/api/llm-configs` | 列出全部配置及当前激活项 ID |
+| POST | `/api/llm-configs` | 创建配置 |
+| PUT | `/api/llm-configs/{config_id}` | 更新配置 |
 | POST | `/api/llm-configs/{config_id}/activate` | 激活配置 |
+| DELETE | `/api/llm-configs/{config_id}` | 删除配置（204） |
+
+无单独「按 ID 查询单条」接口：列表接口已返回各条配置内容。
 
 ## 配置结构
 

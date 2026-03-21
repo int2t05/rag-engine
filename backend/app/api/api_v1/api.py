@@ -23,7 +23,9 @@ from app.modules.llm_config.routes import router as llm_config_router
 api_router = APIRouter()
 
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
-api_router.include_router(knowledge_base_router, prefix="/knowledge-base", tags=["knowledge-base"])
+api_router.include_router(
+    knowledge_base_router, prefix="/knowledge-base", tags=["knowledge-base"]
+)
 api_router.include_router(
     knowledge_documents_router, prefix="/knowledge-base", tags=["knowledge-base"]
 )

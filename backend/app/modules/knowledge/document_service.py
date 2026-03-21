@@ -9,8 +9,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import time
-from datetime import datetime, timedelta
 from io import BytesIO
 from typing import Any, Dict, List, Literal
 
@@ -21,7 +21,6 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.exceptions import BadRequestError, ResourceNotFoundError
 from app.core.minio import get_minio_client
-from app.models.base import BEIJING_TZ
 from app.models.knowledge import Document, DocumentUpload, ProcessingTask
 from app.modules.knowledge.repository import KnowledgeRepository
 from app.schemas.ai_runtime import AiRuntimeSettings
@@ -31,6 +30,7 @@ from app.shared.ai_runtime_scope import ai_runtime_scope
 from app.modules.knowledge.document_processor import (
     PreviewResult,
     preview_document,
+    process_document,
     process_document_background,
 )
 from app.shared.embedding.embedding_factory import EmbeddingsFactory
@@ -39,6 +39,98 @@ from app.shared.vector_store import VectorStoreFactory
 logger = logging.getLogger(__name__)
 
 BATCH_DELETE_DOCS_MAX = 100
+
+
+def _upload_basename(filename: str | None) -> str:
+    if not filename:
+        return ""
+    return os.path.basename(filename.replace("\\", "/"))
+
+
+async def replace_kb_document(
+    db: Session,
+    user_id: int,
+    kb_id: int,
+    doc_id: int,
+    file: UploadFile,
+    *,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+) -> dict:
+    """
+    覆盖已入库文档：上传文件名须与 document.file_name 一致；写入 MinIO 原路径后
+    调用 process_document 做分块级增量更新。
+    """
+    repo = KnowledgeRepository(db)
+    document = repo.get_document_owned(kb_id, doc_id, user_id)
+    if not document:
+        raise ResourceNotFoundError("未找到文档")
+
+    incoming = _upload_basename(file.filename)
+    if not incoming:
+        raise BadRequestError("缺少文件名")
+    if chunk_overlap >= chunk_size:
+        raise BadRequestError("chunk_overlap 必须小于 chunk_size")
+    if incoming != document.file_name:
+        raise BadRequestError(
+            f"文件名须与原文档一致（原文档：{document.file_name}，上传：{incoming}）"
+        )
+
+    content = await file.read()
+    file_size = len(content)
+    file_hash = hashlib.sha256(content).hexdigest()
+
+    minio_client = get_minio_client()
+    ct = file.content_type or document.content_type or "application/octet-stream"
+    try:
+        minio_client.put_object(
+            bucket_name=settings.MINIO_BUCKET_NAME,
+            object_name=document.file_path,
+            data=BytesIO(content),
+            length=file_size,
+            content_type=ct,
+        )
+    except MinioException as e:
+        logger.error("替换文档写入 MinIO 失败: %s", e)
+        raise BadRequestError(f"写入对象存储失败: {e}") from e
+
+    try:
+        await process_document(
+            document.file_path,
+            document.file_name,
+            kb_id,
+            document.id,
+            user_id,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+    except Exception as e:
+        logger.error("replace_kb_document 处理失败: %s", e, exc_info=True)
+        raise BadRequestError(f"增量处理失败: {e}") from e
+
+    document.file_hash = file_hash # type: ignore
+    document.file_size = file_size # type: ignore
+    document.content_type = ct # type: ignore
+    # 保留处理记录：replace 不走上传队列，须单独写入任务行，否则列表无法展示「已完成」
+    db.add(
+        ProcessingTask(
+            knowledge_base_id=kb_id,
+            document_id=document.id,
+            document_upload_id=None,
+            status="completed",
+            error_message=None,
+        )
+    )
+    db.commit()
+    db.refresh(document)
+
+    return {
+        "document_id": document.id,
+        "file_name": document.file_name,
+        "file_hash": document.file_hash,
+        "file_size": document.file_size,
+        "message": "已替换并增量更新向量",
+    }
 
 
 def delete_document_core(
@@ -102,6 +194,9 @@ async def upload_kb_documents(
     files: List[UploadFile],
     _rt: AiRuntimeSettings,
 ) -> List[dict]:
+    """
+    上传多个文件到 MinIO，并创建数据库记录。
+    """
     repo = KnowledgeRepository(db)
     if not repo.get_owned_kb(kb_id, user_id):
         raise ResourceNotFoundError("未找到知识库")
@@ -110,6 +205,7 @@ async def upload_kb_documents(
     minio_client = get_minio_client()
 
     for file in files:
+        # 1.文件去重（SHA-256）
         file_content = await file.read()
         file_hash = hashlib.sha256(file_content).hexdigest()
 
@@ -127,7 +223,7 @@ async def upload_kb_documents(
                 }
             )
             continue
-
+        # 2.上传到 MinIO（临时存储）
         temp_path = f"kb_{kb_id}/temp/{file.filename}"
         try:
             file_size = len(file_content)
@@ -142,6 +238,7 @@ async def upload_kb_documents(
             logger.error("上传文件到MinIO失败：%s", e)
             raise HTTPException(status_code=500, detail="上传文件失败") from e
 
+        # 3.创建数据库记录（待处理）
         upload = DocumentUpload(
             knowledge_base_id=kb_id,
             file_name=file.filename,
@@ -204,23 +301,52 @@ def submit_document_processing(
     background_tasks: BackgroundTasks,
     _rt: AiRuntimeSettings,
 ) -> dict:
+    """
+    提交流待处理文档进入向量处理队列。
+
+    业务流程：
+    1. 权限校验：确认用户拥有该知识库
+    2. 过滤跳过项：从上传结果中排除「已存在无需处理」的文件
+    3. 构造任务：为每个待处理文档创建 ProcessingTask 记录（状态为 pending）
+    4. 批量入库：一次性插入任务记录并 commit
+    5. 触发异步处理：通过 BackgroundTasks 将任务投入后台并发执行
+    6. 返回任务映射：前端可依据 upload_id + task_id 轮询处理状态
+
+    Args:
+        db: 数据库会话
+        user_id: 当前用户 ID（用于校验知识库归属）
+        kb_id: 知识库 ID
+        upload_results: upload_kb_documents 的返回值列表，包含 upload_id / skip_processing 等字段
+        background_tasks: FastAPI BackgroundTasks（用于注册后台任务）
+        _rt: AI 运行时配置（当前未使用，保留接口兼容）
+
+    Returns:
+        {"tasks": [{"upload_id": int, "task_id": int}, ...]}
+    """
     start_time = time.time()
+
+    # 1. 权限校验：确保用户拥有该知识库
     repo = KnowledgeRepository(db)
     if not repo.get_owned_kb(kb_id, user_id):
         raise ResourceNotFoundError("未找到知识库")
 
     task_info: List[dict] = []
     upload_ids: List[int] = []
+
+    # 2. 过滤需要跳过的文档（已在 upload_kb_documents 中判定为「文件已存在」的项无需再次处理）
     for result in upload_results:
         if result.get("skip_processing"):
             continue
         upload_ids.append(result["upload_id"])
 
+    # 无待处理任务，直接返回空列表
     if not upload_ids:
         return {"tasks": []}
 
+    # 3. 批量查询 Upload 记录，组装成 dict 方便后续查找
     uploads_dict = {u.id: u for u in repo.get_uploads_by_ids(upload_ids)}
 
+    # 4. 构造 ProcessingTask 列表（状态默认为 pending）
     all_tasks: List[ProcessingTask] = []
     for upload_id in upload_ids:
         upload = uploads_dict.get(upload_id)
@@ -234,18 +360,24 @@ def submit_document_processing(
             )
         )
 
+    # 5. 批量入库并 commit
     repo.add_processing_tasks(all_tasks)
     db.commit()
     for task in all_tasks:
         db.refresh(task)
 
+    # 6. 组装返回给前端的任务信息，同时准备后台任务所需的数据
     task_data: List[dict] = []
     for i, upload_id in enumerate(upload_ids):
         if i >= len(all_tasks):
             break
         task = all_tasks[i]
         upload = uploads_dict.get(upload_id)
+
+        # 返回给前端的简洁映射
         task_info.append({"upload_id": upload_id, "task_id": task.id})
+
+        # 传递给后台处理函数的完整数据（包含文件路径等信息）
         if upload:
             task_data.append(
                 {
@@ -256,30 +388,46 @@ def submit_document_processing(
                 }
             )
 
+    # 7. 注册后台任务：HTTP 响应返回后，并发执行各文档的向量化处理
     background_tasks.add_task(add_processing_tasks_to_queue, task_data, kb_id, user_id)
+
     elapsed = round(time.time() - start_time, 2)
     logger.info("已提交 %s 个文档处理任务，耗时 %ss", len(task_info), elapsed)
     return {"tasks": task_info}
 
 
-async def add_processing_tasks_to_queue(task_data: List[dict], kb_id: int, user_id: int):
-    """响应返回后并发执行各文档处理。"""
+async def add_processing_tasks_to_queue(
+    task_data: List[dict], kb_id: int, user_id: int
+):
+    """
+    响应返回后并发执行各文档处理。
+
+    该函数在 HTTP 响应发送给前端后，由 BackgroundTasks 在后台运行，
+    真正完成文档的读取、分块、向量化、写入向量库等耗时操作。
+    """
+    # 无任务时直接返回，避免不必要地创建事件循环
     if not task_data:
         return
+
+    # 使用 asyncio.gather 并发执行所有文档的向量化处理；
+    # return_exceptions=True 使单个任务失败不影响其他任务，
+    # 异常会被捕获进 results 列表而非直接抛出
     results = await asyncio.gather(
         *[
             process_document_background(
-                data["temp_path"],
-                data["file_name"],
-                kb_id,
-                data["task_id"],
-                None,
-                user_id=user_id,
+                data["temp_path"],  # MinIO 临时文件路径
+                data["file_name"],  # 文件名（用于日志和写回记录）
+                kb_id,  # 知识库 ID
+                data["task_id"],  # ProcessingTask 主键（用于更新状态）
+                None,  # chunk_size（None 表示使用默认配置）
+                user_id=user_id,  # 操作用户（用于权限校验）
             )
             for data in task_data
         ],
         return_exceptions=True,
     )
+
+    # 逐个检查任务结果，将失败项记录到 error 日志
     for data, res in zip(task_data, results):
         if isinstance(res, Exception):
             logger.error(
@@ -287,8 +435,11 @@ async def add_processing_tasks_to_queue(task_data: List[dict], kb_id: int, user_
                 data.get("task_id"),
                 data.get("file_name"),
                 res,
+                # 有 traceback 时打印完整堆栈，方便排查；无堆栈时只打印异常对象本身
                 exc_info=res if res.__traceback__ else None,
             )
+
+    # 批次结束日志（成功的任务不打印具体信息，失败信息已在上面逐条输出）
     logger.info(
         "文档处理批次结束：共 %s 个任务（失败见上方 error 日志）",
         len(task_data),
@@ -296,10 +447,17 @@ async def add_processing_tasks_to_queue(task_data: List[dict], kb_id: int, user_
 
 
 def cleanup_temp_files(db: Session) -> dict:
+    """
+    清理临时上传与孤立任务。
+    1. 排除集：仅「DocumentUpload 仍为 pending」且存在 pending/processing 任务
+    2. 其余上传 → 删关联任务、删 MinIO、删 upload 行
+    3. 再删无 upload/document 指向的孤立 ProcessingTask
+    """
     repo = KnowledgeRepository(db)
-    running_subq = repo.list_running_upload_ids_subquery()
-    cutoff = datetime.now(BEIJING_TZ) - timedelta(hours=24)
-    uploads_to_delete = repo.list_stale_uploads(cutoff, running_subq)
+
+    protected_subq = repo.list_running_upload_ids_subquery()
+
+    uploads_to_delete = repo.list_uploads_eligible_for_cleanup(protected_subq)
     upload_ids_to_delete = [u.id for u in uploads_to_delete]
 
     deleted_tasks = 0
@@ -320,6 +478,7 @@ def cleanup_temp_files(db: Session) -> dict:
         repo.delete_upload_row(upload)
 
     db.commit()
+
     msg = f"已清理{len(uploads_to_delete)}条上传记录、{deleted_tasks}条任务处理记录"
     if orphan_tasks_deleted:
         msg += f"（含{orphan_tasks_deleted}条孤立任务）"
@@ -329,6 +488,9 @@ def cleanup_temp_files(db: Session) -> dict:
 def get_processing_tasks_status(
     db: Session, user_id: int, kb_id: int, task_ids_csv: str
 ) -> dict:
+    """
+    获取处理任务状态
+    """
     repo = KnowledgeRepository(db)
     if not repo.get_owned_kb(kb_id, user_id):
         raise ResourceNotFoundError("Knowledge base not found")
@@ -352,6 +514,9 @@ def get_processing_tasks_status(
 def get_document_detail(
     db: Session, user_id: int, kb_id: int, doc_id: int
 ) -> DocumentResponse:
+    """
+    获取文件详情
+    """
     repo = KnowledgeRepository(db)
     document = repo.get_document_owned(kb_id, doc_id, user_id)
     if not document:
@@ -380,6 +545,9 @@ def delete_one_document(
     doc_id: int,
     _rt: AiRuntimeSettings,
 ) -> dict:
+    """
+    删除一个文件
+    """
     result = delete_document_core(db, kb_id, doc_id, user_id)
     if result == "not_found":
         raise ResourceNotFoundError("文件未找到")
@@ -393,6 +561,9 @@ def batch_delete_documents(
     document_ids: List[int],
     _rt: AiRuntimeSettings,
 ) -> dict:
+    """
+    批量删除文件
+    """
     repo = KnowledgeRepository(db)
     if not repo.get_owned_kb(kb_id, user_id):
         raise ResourceNotFoundError("未找到知识库")

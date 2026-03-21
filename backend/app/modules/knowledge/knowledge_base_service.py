@@ -35,9 +35,7 @@ def create_knowledge_base(
     db: Session, user_id: int, kb_in: KnowledgeBaseCreate
 ) -> KnowledgeBase:
     """新建知识库并 commit。"""
-    kb = KnowledgeBase(
-        name=kb_in.name, description=kb_in.description, user_id=user_id
-    )
+    kb = KnowledgeBase(name=kb_in.name, description=kb_in.description, user_id=user_id)
     db.add(kb)
     db.commit()
     db.refresh(kb)
@@ -71,8 +69,10 @@ def get_knowledge_base_detail(
         )
         for t in pending_rows
     ]
-    data = KnowledgeBaseResponse.model_validate(kb)
-    return data.model_copy(update={"pending_upload_tasks": pending_list})
+    data = KnowledgeBaseResponse.model_validate(kb)  # ORM → Pydantic（过滤字段）
+    return data.model_copy(
+        update={"pending_upload_tasks": pending_list}
+    )  # 追加 pending_upload_tasks 字段
 
 
 def update_knowledge_base(
@@ -123,9 +123,7 @@ def delete_knowledge_base(
                 settings.MINIO_BUCKET_NAME, prefix=f"kb_{kb_id}/"
             )
             for obj in objects:
-                minio_client.remove_object(
-                    settings.MINIO_BUCKET_NAME, obj.object_name
-                )
+                minio_client.remove_object(settings.MINIO_BUCKET_NAME, obj.object_name)
             logger.info("清理知识库 %s 的 MinIO 文件", kb_id)
         except MinioException as e:
             cleanup_errors.append(f"无法清理MinIO文件: {str(e)}")
