@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import BadRequestError, ResourceNotFoundError
 from app.models.base import BEIJING_TZ
 from app.models.evaluation import EvaluationTask, EvaluationTestCase
+from app.modules.evaluation.evaluation_config import resolve_metrics
 from app.modules.evaluation.repository import EvaluationRepository
 from app.schemas.evaluation import (
     EvaluationResolveResponse,
@@ -29,7 +30,13 @@ from app.modules.evaluation import run_evaluation_task
 _STALE_RUNNING_MINUTES = 90
 
 
-def _is_stale_running(task: EvaluationTask, minutes: int = _STALE_RUNNING_MINUTES) -> bool:
+def _is_stale_running(
+    task: EvaluationTask, minutes: int = _STALE_RUNNING_MINUTES
+) -> bool:
+    """
+    判断任务是否已僵死（执行中且超过指定时间未更新）
+    """
+
     if task.status != "running":
         return False
     u = task.updated_at
@@ -44,10 +51,19 @@ def _is_stale_running(task: EvaluationTask, minutes: int = _STALE_RUNNING_MINUTE
 def create_task(
     db: Session, user_id: int, task_in: EvaluationTaskCreate
 ) -> EvaluationTask:
+    """
+    创建评估任务（含测试用例）。
+    若指定 knowledge_base_id，需校验该知识库属于当前用户。
+    """
     repo = EvaluationRepository(db)
     if task_in.knowledge_base_id:
         if not repo.get_owned_kb(task_in.knowledge_base_id, user_id):
             raise ResourceNotFoundError("知识库不存在或无权访问")
+
+    try:
+        resolve_metrics(task_in.evaluation_type, task_in.evaluation_metrics)
+    except ValueError as e:
+        raise BadRequestError(str(e)) from e
 
     task = EvaluationTask(
         name=task_in.name,
@@ -79,12 +95,17 @@ def create_task(
 def list_tasks(
     db: Session, user_id: int, skip: int = 0, limit: int = 100
 ) -> List[EvaluationTask]:
+    """获取当前用户的评估任务列表，支持分页"""
     return EvaluationRepository(db).list_tasks(user_id, skip=skip, limit=limit)
 
 
 def import_test_cases(
     db: Session, user_id: int, task_id: int, body: TestCaseBatchImport
 ) -> TestCaseBatchImportResult:
+    """
+    向已有评估任务批量追加测试用例（JSON 与创建任务时 test_cases 字段结构相同）。
+    执行中任务不可导入；问题为空的条目会跳过并计入 skipped。
+    """
     repo = EvaluationRepository(db)
     task = repo.get_task_for_user(task_id, user_id, with_test_cases=False)
     if not task:
@@ -118,9 +139,12 @@ def import_test_cases(
     )
 
 
-def resolve_task(
-    db: Session, user_id: int, task_id: int
-) -> EvaluationResolveResponse:
+def resolve_task(db: Session, user_id: int, task_id: int) -> EvaluationResolveResponse:
+    """
+    获取当前用户的评估任务详情。
+    若任务不存在或无权访问，返回 ok=false。
+    若任务存在，返回 ok=true，并返回任务详情。
+    """
     task = EvaluationRepository(db).get_task_for_user(
         task_id, user_id, with_test_cases=True
     )
@@ -134,6 +158,7 @@ def resolve_task(
 
 
 def get_task_detail(db: Session, user_id: int, task_id: int) -> EvaluationTask:
+    """获取当前用户的评估任务详情（含测试用例）"""
     task = EvaluationRepository(db).get_task_for_user(
         task_id, user_id, with_test_cases=True
     )
@@ -143,6 +168,7 @@ def get_task_detail(db: Session, user_id: int, task_id: int) -> EvaluationTask:
 
 
 def delete_task(db: Session, user_id: int, task_id: int, force: bool) -> dict:
+    """删除评估任务（级联删除测试用例与结果）"""
     repo = EvaluationRepository(db)
     task = repo.get_task_for_user(task_id, user_id, with_test_cases=False)
     if not task:
@@ -163,6 +189,9 @@ def schedule_run(
     background_tasks: BackgroundTasks,
     force: bool = False,
 ) -> dict:
+    """
+    调度执行评估任务
+    """
     repo = EvaluationRepository(db)
     task = repo.get_task_for_user(task_id, user_id, with_test_cases=False)
     if not task:
@@ -191,6 +220,7 @@ def schedule_run(
 
 
 def list_results(db: Session, user_id: int, task_id: int):
+    """获取当前用户的评估任务结果列表"""
     repo = EvaluationRepository(db)
     task = repo.get_task_for_user(task_id, user_id, with_test_cases=False)
     if not task:

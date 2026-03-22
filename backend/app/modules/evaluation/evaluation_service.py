@@ -2,7 +2,7 @@
 RAG 评估执行服务
 ================
 每条用例：1. 检索 → 2. 生成 → 3. RAGAS 打分 → 4. 落库。
-PASS_THRESHOLD：汇总是否通过的门槛（默认 0.6）。
+仅计算各 RAGAS 指标分值，不做通过/失败判定与综合分。
 """
 
 import asyncio
@@ -47,12 +47,9 @@ try:
 except ImportError as e:
     _RAGAS_IMPORT_ERROR = str(e)
 
-# 与 RAGAS 分数字段一起用于判断是否「通过」
-PASS_THRESHOLD = 0.6
-
-
 def _empty_score_row() -> dict:
-    return {k: None for k in SCORE_KEYS} | {"ragas_score": None}
+    """无 RAGAS 或异常时的占位结构（与 evaluate_metrics_sample 键一致，不含 skipped）。"""
+    return {k: None for k in SCORE_KEYS}
 
 
 def _call_sync_with_timeout(fn: Any, timeout_sec: float, label: str) -> Any:
@@ -178,23 +175,6 @@ def _evaluate_with_ragas(
         return {**_empty_score_row(), "error": str(e)}
 
 
-def _is_passed(scores: dict, metrics_used: List[str]) -> int:
-    """
-    本次任务所选指标均须有有效分数，且均 ≥ PASS_THRESHOLD。
-    """
-    for m in metrics_used:
-        v = scores.get(m)
-        if v is None:
-            return 0
-        try:
-            fv = float(v)
-        except (TypeError, ValueError):
-            return 0
-        if fv < PASS_THRESHOLD:
-            return 0
-    return 1
-
-
 def run_evaluation_task(task_id: int) -> None:
     """
     后台执行评估任务的主入口。
@@ -236,7 +216,7 @@ def run_evaluation_task(task_id: int) -> None:
                 .first()
             )
             if kb_u:
-                uid = kb_u.user_id
+                uid = kb_u.user_id  # type: ignore
 
         if not uid:
             task.status = "failed"  # type: ignore
@@ -275,6 +255,9 @@ def _run_evaluation_body(
     task: EvaluationTask,
     test_cases: List[EvaluationTestCase],
 ) -> None:
+    """
+    运行评估任务
+    """
     # 2. 加载向量存储和 LLM（如需知识库）
     vector_store = None
     if task.knowledge_base_id:
@@ -310,10 +293,15 @@ def _run_evaluation_body(
     needs_retrieval = EVALUATION_TYPE_NEEDS_RETRIEVAL.get(eval_type, True)
     needs_generation = EVALUATION_TYPE_NEEDS_GENERATION.get(eval_type, True)
     raw_em = getattr(task, "evaluation_metrics", None)
-    metrics_for_type = resolve_metrics(eval_type, raw_em)
+    try:
+        metrics_for_type = resolve_metrics(eval_type, raw_em)
+    except ValueError as e:
+        task.status = "failed"  # type: ignore
+        task.error_message = str(e)  # type: ignore
+        db.commit()
+        return
 
     start_time = time.time()
-    total_passed = 0
     score_lists: Dict[str, List[float]] = {k: [] for k in SCORE_KEYS}
 
     # 3. 对每个测试用例：检索 → 生成（按需）→ 评估 → 保存
@@ -350,9 +338,6 @@ def _run_evaluation_body(
             if generated_answer is None:
                 generated_answer = ""
 
-        passed = _is_passed(scores, metrics_for_type)
-        total_passed += passed
-
         for k in SCORE_KEYS:
             v = scores.get(k)
             if v is not None:
@@ -365,11 +350,6 @@ def _run_evaluation_body(
         def _mask_score(name: str) -> Optional[float]:
             return scores.get(name) if name in metrics_for_type else None
 
-        _three_core = (
-            "context_relevance" in metrics_for_type
-            and "faithfulness" in metrics_for_type
-            and "answer_relevance" in metrics_for_type
-        )
         result = EvaluationResult(
             task_id=task_id,
             test_case_id=tc.id,
@@ -380,16 +360,14 @@ def _run_evaluation_body(
             answer_relevance=_mask_score("answer_relevance"),
             context_recall=_mask_score("context_recall"),
             context_precision=_mask_score("context_precision"),
-            ragas_score=(
-                scores.get("ragas_score") if _three_core else None
-            ),
-            passed=passed,
+            ragas_score=None,
+            passed=None,
             judge_details={
                 k: v
                 for k, v in scores.items()
                 if k
                 in set(metrics_for_type)
-                | {"ragas_score", "error", "skipped", "answer_correctness"}
+                | {"error", "skipped", "answer_correctness"}
             },
         )
         db.add(result)
@@ -398,19 +376,17 @@ def _run_evaluation_body(
     # 4. 汇总统计
     duration = time.time() - start_time
     n = len(test_cases)
-    pass_rate = total_passed / n if n else 0
 
     base_summary: dict = {
         "total": n,
-        "passed": total_passed,
-        "failed": n - total_passed,
-        "pass_rate": round(pass_rate, 4),
         "duration_seconds": round(duration, 2),
         "evaluation_type": eval_type,
         "metrics": metrics_for_type,
     }
     if not _RAGAS_AVAILABLE:
-        base_summary["warning"] = "RAGAS 未安装，无法计算评分。请执行: pip install ragas datasets"
+        base_summary["warning"] = (
+            "RAGAS 未安装，无法计算评分。请执行: pip install ragas datasets"
+        )
     for k, label in AVG_SUMMARY_KEYS.items():
         vals = score_lists[k]
         if vals:

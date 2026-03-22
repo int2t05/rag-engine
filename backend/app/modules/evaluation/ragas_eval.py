@@ -136,6 +136,7 @@ class StrictAnswerCorrectness(AnswerCorrectness):
 
 # ---------- 与数据库运行时配置一致的 RAGAS LLM / Embeddings ----------
 
+
 def _base(url: str) -> str:
     b = (url or "").strip()
     return b if not b or b.endswith("/") else f"{b}/"
@@ -146,6 +147,9 @@ def _ollama_host(url: str) -> str:
 
 
 def build_ragas_llm(ai: AiRuntimeSettings) -> Any:
+    """
+    构建 RAGAS LLM
+    """
     from ragas.llms.base import llm_factory
 
     p = (ai.chat_provider or "openai").lower()
@@ -168,6 +172,9 @@ def build_ragas_llm(ai: AiRuntimeSettings) -> Any:
 
 
 def build_ragas_embeddings(ai: AiRuntimeSettings) -> Any:
+    """
+    构建 RAGAS Embeddings
+    """
     from ragas.embeddings.base import embedding_factory
 
     raw = (ai.embeddings_provider or "openai").strip().lower().replace("-", "_")
@@ -213,10 +220,16 @@ _EMBED_METRICS: Set[str] = {"answer_relevance", "answer_correctness"}
 
 
 def metrics_need_embeddings(names: List[str]) -> bool:
+    """
+    判断是否需要 embeddings
+    """
     return bool(_EMBED_METRICS.intersection(names))
 
 
 def build_ragas_dependencies(need_emb: bool) -> Tuple[Any, Optional[Any]]:
+    """
+    构造 (llm, embeddings)。仅在 need_embeddings 为 True 时创建嵌入，避免多余 API 调用。
+    """
     from app.shared.ai_runtime_context import get_ai_runtime
 
     ai = get_ai_runtime()
@@ -226,6 +239,9 @@ def build_ragas_dependencies(need_emb: bool) -> Tuple[Any, Optional[Any]]:
 
 
 def build_metric_instances(llm: Any, emb: Any, names: List[str]) -> Dict[str, Any]:
+    """
+    构建指标实例
+    """
     out: Dict[str, Any] = {}
     for n in names:
         if n == "faithfulness":
@@ -251,12 +267,20 @@ def build_metric_instances(llm: Any, emb: Any, names: List[str]) -> Dict[str, An
 
 # (ans_ok, ctx_ok, ref_ok) -> skip 原因或 None
 _SKIP: Dict[str, Callable[[bool, bool, bool], Optional[str]]] = {
-    "faithfulness": lambda a, c, r: None if (a and c) else "需要非空 response 与 retrieved_contexts",
+    "faithfulness": lambda a, c, r: (
+        None if (a and c) else "需要非空 response 与 retrieved_contexts"
+    ),
     "answer_relevance": lambda a, c, r: None if a else "需要非空 response",
     "context_relevance": lambda a, c, r: None if c else "需要非空 retrieved_contexts",
-    "context_precision": lambda a, c, r: None if (r and c) else "需要 reference 与 retrieved_contexts",
-    "context_recall": lambda a, c, r: None if (r and c) else "需要 reference 与 retrieved_contexts",
-    "answer_correctness": lambda a, c, r: None if (a and r) else "需要非空 response 与 reference",
+    "context_precision": lambda a, c, r: (
+        None if (r and c) else "需要 reference 与 retrieved_contexts"
+    ),
+    "context_recall": lambda a, c, r: (
+        None if (r and c) else "需要 reference 与 retrieved_contexts"
+    ),
+    "answer_correctness": lambda a, c, r: (
+        None if (a and r) else "需要非空 response 与 reference"
+    ),
 }
 
 # kwargs for metric.ascore
@@ -267,7 +291,10 @@ _KW: Dict[str, Callable[[str, str, List[str], str], dict]] = {
         "retrieved_contexts": ctx,
     },
     "answer_relevance": lambda u, resp, ctx, ref: {"user_input": u, "response": resp},
-    "context_relevance": lambda u, resp, ctx, ref: {"user_input": u, "retrieved_contexts": ctx},
+    "context_relevance": lambda u, resp, ctx, ref: {
+        "user_input": u,
+        "retrieved_contexts": ctx,
+    },
     "context_precision": lambda u, resp, ctx, ref: {
         "user_input": u,
         "reference": ref,
@@ -317,7 +344,9 @@ async def _ascore_retry(
         except Exception as e:
             last = e
             if i == max_retries:
-                logging.warning("RAGAS 指标 %s 在 %s 次重试后仍失败: %s", label, max_retries, e)
+                logging.warning(
+                    "RAGAS 指标 %s 在 %s 次重试后仍失败: %s", label, max_retries, e
+                )
                 raise
             await asyncio.sleep(1)
     raise RuntimeError(last)  # pragma: no cover
@@ -332,6 +361,9 @@ async def evaluate_metrics_sample(
     reference: str,
     max_retries: int = 3,
 ) -> Dict[str, Any]:
+    """
+    对单条样本按已构建的 instances 计算分数。
+    """
     scores: Dict[str, Optional[float]] = {k: None for k in SCORE_KEYS}
     skipped: Dict[str, str] = {}
 
@@ -355,12 +387,9 @@ async def evaluate_metrics_sample(
             scores[name] = None
             skipped[name] = str(e)
 
-    cr, f, ar = scores.get("context_relevance"), scores.get("faithfulness"), scores.get("answer_relevance")
-    ragas_score = (cr + f + ar) / 3.0 if None not in (cr, f, ar) else None # type: ignore
-
-    return {**scores, "ragas_score": ragas_score, "skipped": skipped}
+    return {**scores, "skipped": skipped}
 
 
 def empty_score_row() -> dict:
     """无 RAGAS 或异常时的占位结构（与 evaluate_metrics_sample 键一致，不含 skipped）。"""
-    return {k: None for k in SCORE_KEYS} | {"ragas_score": None}
+    return {k: None for k in SCORE_KEYS}

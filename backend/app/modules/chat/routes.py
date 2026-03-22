@@ -113,8 +113,15 @@ async def create_message_endpoint(
 ) -> StreamingResponse:
     """
     发送消息并获取 RAG 流式回答（SSE）。
-    rt 由依赖注入；set/reset 必须在流式生成器同一上下文中完成。
+
+    业务流程：
+    1. 依赖注入：db / current_user / rt（AI 运行时配置）
+    2. 权限校验：查询对话归属，组装历史消息上下文
+    3. 流式生成：yield SSE 格式的增量回答
+    4. 上下文清理：流结束后重置 AI 运行时 token
     """
+
+    # 1. 获取对话上下文：验证用户对对话的所有权
     try:
         _, knowledge_base_ids, messages = get_stream_context(
             db, current_user.id, chat_id, body
@@ -124,24 +131,30 @@ async def create_message_endpoint(
     except BadRequestError as e:
         raise HTTPException(status_code=400, detail=e.detail) from e
 
+    # 2. 定义客户端断开连接检查函数（供 generate_response 轮询）
     async def disconnect_check() -> bool:
         return await request.is_disconnected()
 
+    # 3. 流式生成器：在同一上下文中设置 / 重置 AI runtime token
+    # yield 每个 SSE chunk 给客户端，直到 LLM 输出完毕或客户端断开
     async def response_stream():
+        # 将 rt 存入 ContextVar，使其在异步调用链中全局可访问
         tok = set_ai_runtime_token(rt)
         try:
             async for chunk in generate_response(
-                query=body.messages[-1].content,
-                messages=messages,
-                knowledge_base_ids=knowledge_base_ids,
-                chat_id=chat_id,
-                db=db,
-                client_disconnected=disconnect_check,
+                query=body.messages[-1].content,  # 用户当前输入作为 query
+                messages=messages,  # 整理后的历史消息（含 system prompt）
+                knowledge_base_ids=knowledge_base_ids,  # RAG 检索使用的知识库列表
+                chat_id=chat_id,  # 关联对话 ID
+                db=db,  # 复用已有会话（注意事务边界）
+                client_disconnected=disconnect_check,  # 断开检测（节省服务端资源）
             ):
                 yield chunk
         finally:
+            # 无论正常结束还是异常中断，必须重置 token，避免 ContextVar 污染后续请求
             reset_ai_runtime_token(tok)
 
+    # 4. 返回 SSE 流响应
     return StreamingResponse(
         response_stream(),
         media_type="text/event-stream",

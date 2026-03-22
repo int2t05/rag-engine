@@ -39,6 +39,9 @@ class EvaluationRepository:
         self.db = db
 
     def _base_task_query(self, user_id: int):
+        """
+        获取当前用户可访问的评估任务。
+        """
         return (
             self.db.query(EvaluationTask)
             .outerjoin(
@@ -48,9 +51,7 @@ class EvaluationRepository:
             .filter(evaluation_task_accessible(user_id))
         )
 
-    def get_owned_kb(
-        self, kb_id: int, user_id: int
-    ) -> Optional[KnowledgeBase]:
+    def get_owned_kb(self, kb_id: int, user_id: int) -> Optional[KnowledgeBase]:
         """创建任务时校验知识库归属。"""
         return (
             self.db.query(KnowledgeBase)
@@ -62,14 +63,23 @@ class EvaluationRepository:
         )
 
     def add_task(self, task: EvaluationTask) -> None:
+        """
+        添加任务。
+        """
         self.db.add(task)
 
     def add_test_case(self, tc: EvaluationTestCase) -> None:
+        """
+        添加测试用例。
+        """
         self.db.add(tc)
 
     def list_tasks(
         self, user_id: int, skip: int = 0, limit: int = 100
     ) -> list[EvaluationTask]:
+        """
+        获取任务列表。
+        """
         return (
             self._base_task_query(user_id)
             .order_by(EvaluationTask.id.desc())
@@ -81,15 +91,24 @@ class EvaluationRepository:
     def get_task_for_user(
         self, task_id: int, user_id: int, *, with_test_cases: bool = False
     ) -> Optional[EvaluationTask]:
+        """
+        获取任务详情。
+        """
         q = self._base_task_query(user_id).filter(EvaluationTask.id == task_id)
         if with_test_cases:
             q = q.options(joinedload(EvaluationTask.test_cases))
         return q.first()
 
     def delete_task(self, task: EvaluationTask) -> None:
+        """
+        删除任务
+        """
         self.db.delete(task)
 
     def list_results_for_task_ordered(self, task_id: int) -> list[EvaluationResult]:
+        """
+        获取任务结果列表。
+        """
         return (
             self.db.query(EvaluationResult)
             .filter(EvaluationResult.task_id == task_id)

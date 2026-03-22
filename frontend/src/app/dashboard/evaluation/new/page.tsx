@@ -22,6 +22,7 @@ import {
 } from "@/lib/evaluation-import";
 import {
   DEFAULT_ALLOWED_METRICS,
+  METRICS_BY_EVAL_TYPE,
   METRIC_LABELS,
 } from "@/lib/evaluation-metrics";
 import { DEFAULT_TOP_K, parseTopK } from "@/lib/form-defaults";
@@ -37,9 +38,7 @@ export default function NewEvaluationPage() {
   const [topKInput, setTopKInput] = useState("");
   const [evaluationType, setEvaluationType] = useState("full");
   const [evalTypes, setEvalTypes] = useState<EvaluationTypeInfo[]>([]);
-  /** 自定义指标时为 true，请求体带 evaluation_metrics */
-  const [customizeMetrics, setCustomizeMetrics] = useState(false);
-  /** 多选中的指标 id（合法子集） */
+  /** 当前类型下要计算的指标（与后端类型约束一致） */
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
   const [testCases, setTestCases] = useState<EvaluationTestCaseCreate[]>([
     { query: "", reference: "" },
@@ -47,7 +46,7 @@ export default function NewEvaluationPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [importJsonError, setImportJsonError] = useState("");
-  const [replaceOnImport, setReplaceOnImport] = useState(false);
+  const [replaceOnImport, setReplaceOnImport] = useState(true);
   const [showJsonHint, setShowJsonHint] = useState(false);
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -97,20 +96,24 @@ export default function NewEvaluationPage() {
     })();
   }, []);
 
+  const currentEvalType = evalTypes.find((t) => t.type === evaluationType);
+
   // 切换「评估类型」时，把多选预设同步为该类型的默认指标集
   useEffect(() => {
     const info = evalTypes.find((t) => t.type === evaluationType);
-    if (info?.metrics?.length) {
-      setSelectedMetrics([...info.metrics]);
-    }
+    const defaults =
+      info?.metrics?.length
+        ? [...info.metrics]
+        : [...(METRICS_BY_EVAL_TYPE[evaluationType] ?? DEFAULT_ALLOWED_METRICS)];
+    setSelectedMetrics(defaults);
   }, [evaluationType, evalTypes]);
 
-  const allowedMetricIds =
-    evalTypes[0]?.allowed_metrics?.length
-      ? evalTypes[0].allowed_metrics
-      : [...DEFAULT_ALLOWED_METRICS];
-
-  const currentEvalType = evalTypes.find((t) => t.type === evaluationType);
+  const allowedMetricIds: string[] = (() => {
+    if (currentEvalType?.allowed_metrics?.length)
+      return [...currentEvalType.allowed_metrics];
+    if (currentEvalType?.metrics?.length) return [...currentEvalType.metrics];
+    return [...(METRICS_BY_EVAL_TYPE[evaluationType] ?? DEFAULT_ALLOWED_METRICS)];
+  })();
 
   const addTestCase = () => {
     setTestCases((prev) => [...prev, { query: "", reference: "" }]);
@@ -158,8 +161,8 @@ export default function NewEvaluationPage() {
       setError("至少添加一个有效的测试用例（问题不能为空）");
       return;
     }
-    if (customizeMetrics && selectedMetrics.length === 0) {
-      setError("请至少选择一个评估指标，或关闭「自定义指标」使用类型默认");
+    if (selectedMetrics.length === 0) {
+      setError("请至少选择一个评估指标");
       return;
     }
 
@@ -173,9 +176,7 @@ export default function NewEvaluationPage() {
         knowledge_base_id: knowledgeBaseId || undefined,
         top_k: parseTopK(topKInput),
         evaluation_type: evaluationType,
-        ...(customizeMetrics && selectedMetrics.length > 0
-          ? { evaluation_metrics: [...selectedMetrics].sort() }
-          : {}),
+        evaluation_metrics: [...selectedMetrics].sort(),
         test_cases: validCases,
       });
       router.push(PATH.evaluationDetail(task.id));
@@ -303,106 +304,68 @@ export default function NewEvaluationPage() {
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-sm font-medium text-gray-800">评估指标</p>
-              <p className="text-xs text-gray-500 mt-0.5">
-                默认跟随上方「评估类型」；开启自定义后可勾选一项或多项
-              </p>
-            </div>
-            <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={customizeMetrics}
-                onChange={(e) => setCustomizeMetrics(e.target.checked)}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              自定义指标
-            </label>
+          <div>
+            <p className="text-sm font-medium text-gray-800">评估指标</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              选项随「评估类型」变化：检索类仅含三项检索指标；生成类仅含生成侧指标；完整评估可勾选全部六项。
+            </p>
           </div>
 
-          {!customizeMetrics && (
-            <div className="flex flex-wrap gap-2">
-              {currentEvalType?.metrics?.length ? (
-                currentEvalType.metrics.map((id) => (
-                  <span
-                    key={id}
-                    className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-white border border-gray-200 text-gray-700"
-                  >
-                    {METRIC_LABELS[id] ?? id}
-                  </span>
-                ))
-              ) : (
-                <span className="text-xs text-gray-500">加载类型配置中…</span>
-              )}
-            </div>
-          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                setSelectedMetrics(
+                  currentEvalType?.metrics?.length
+                    ? [...currentEvalType.metrics]
+                    : [...allowedMetricIds],
+                )
+              }
+              className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            >
+              恢复类型默认
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedMetrics([...allowedMetricIds])}
+              className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            >
+              全选（本类型允许范围内）
+            </button>
+          </div>
 
-          {customizeMetrics && (
-            <>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSelectedMetrics(
-                      currentEvalType?.metrics?.length
-                        ? [...currentEvalType.metrics]
-                        : [...allowedMetricIds],
-                    )
-                  }
-                  className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {allowedMetricIds.map((id) => {
+              const checked = selectedMetrics.includes(id);
+              return (
+                <label
+                  key={id}
+                  className={`flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm cursor-pointer transition-colors ${
+                    checked
+                      ? "border-blue-400 bg-blue-50/60"
+                      : "border-gray-200 bg-white hover:border-gray-300"
+                  }`}
                 >
-                  使用当前类型默认
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedMetrics([...allowedMetricIds])}
-                  className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
-                >
-                  全选
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedMetrics([])}
-                  className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
-                >
-                  清空
-                </button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {allowedMetricIds.map((id) => {
-                  const checked = selectedMetrics.includes(id);
-                  return (
-                    <label
-                      key={id}
-                      className={`flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm cursor-pointer transition-colors ${
-                        checked
-                          ? "border-blue-400 bg-blue-50/60"
-                          : "border-gray-200 bg-white hover:border-gray-300"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() =>
-                          setSelectedMetrics((prev) =>
-                            prev.includes(id)
-                              ? prev.filter((x) => x !== id)
-                              : [...prev, id],
-                          )
-                        }
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-gray-800">{METRIC_LABELS[id] ?? id}</span>
-                      <span className="text-[10px] text-gray-400 font-mono ml-auto truncate max-w-[40%]">
-                        {id}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            </>
-          )}
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() =>
+                      setSelectedMetrics((prev) =>
+                        prev.includes(id)
+                          ? prev.filter((x) => x !== id)
+                          : [...prev, id],
+                      )
+                    }
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-gray-800">{METRIC_LABELS[id] ?? id}</span>
+                  <span className="text-[10px] text-gray-400 font-mono ml-auto truncate max-w-[40%]">
+                    {id}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
         </div>
 
         <div>

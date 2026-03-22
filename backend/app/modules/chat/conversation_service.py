@@ -34,13 +34,15 @@ def create_chat(db: Session, user_id: int, chat_in: ChatCreate) -> Chat:
 def list_chats(
     db: Session, user_id: int, skip: int = 0, limit: int = 100
 ) -> List[Chat]:
+    """获取当前用户的对话列表，支持分页"""
     return ChatRepository(db).list_chats_for_user(user_id, skip=skip, limit=limit)
 
 
 def batch_delete_chats(
     db: Session, user_id: int, chat_ids: List[int], max_batch: int
 ) -> dict:
-    raw_ids = list(dict.fromkeys(chat_ids))
+    """批量删除对话；若对话不存在或不属于用户则 400。"""
+    raw_ids = list(dict.fromkeys(chat_ids))  # 去重，保持顺序
     ids = [i for i in raw_ids if i > 0]
     if not ids:
         raise BadRequestError("请提供至少一个有效的 chat_id")
@@ -58,6 +60,7 @@ def batch_delete_chats(
 
 
 def get_chat(db: Session, user_id: int, chat_id: int) -> Chat:
+    """获取单条对话详情"""
     chat = ChatRepository(db).get_by_id_for_user(chat_id, user_id)
     if not chat:
         raise ResourceNotFoundError("未找到聊天")
@@ -86,6 +89,7 @@ def get_stream_context(
 
 
 def delete_chat(db: Session, user_id: int, chat_id: int) -> None:
+    """删除单条对话"""
     repo = ChatRepository(db)
     chat = repo.get_by_id_for_user(chat_id, user_id)
     if not chat:

@@ -37,6 +37,7 @@ def dedupe_scored_pairs(
 
 
 def _doc_dedupe_key(doc: Any) -> tuple:
+    """对 LangChain Document 生成去重键。"""
     md = dict(getattr(doc, "metadata", None) or {})
     cid = md.get("chunk_id")
     if cid:

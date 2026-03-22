@@ -69,6 +69,7 @@ Default API prefix: `/api` (`API_V1_STR`): `/auth`, `/knowledge-base`, `/chat`, 
 
 - [docs/README.md](docs/README.md) (index, Chinese)
 - [Architecture](docs/架构/后端项目架构说明.md)
+- [API routes](docs/架构/API路由.md) (Chinese, path reference)
 - [Business flows](docs/业务流程/00-业务流程总览与索引.md)
 
 ## License

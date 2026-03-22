@@ -19,6 +19,10 @@
 | GET | `/` | 浏览器访问重定向至 `/docs`；非 HTML 客户端返回 JSON |
 | GET | `/api/health` | 健康检查（`status`、`version`） |
 
+## 错误响应
+
+业务层抛出的 **`AppServiceError`**（`app.core.exceptions`）由 `app/main.py` 中的全局异常处理器捕获，映射为与 **`HTTPException` 相同形状**的 JSON：`{"detail": ...}`；401 等场景下可带 `WWW-Authenticate` 等响应头（见 `app/api/errors.py` 中 `http_exception_from_service`）。
+
 ## 认证模块 `/api/auth`
 
 | 方法 | 端点 | 功能 |
@@ -46,12 +50,12 @@
 | POST | `/{kb_id}/documents/upload` | 多文件上传至 MinIO 临时区 |
 | POST | `/{kb_id}/documents/preview` | 预览分块 |
 | POST | `/{kb_id}/documents/process` | 提交解析/向量化任务 |
+| POST | `/cleanup` | 清理临时上传（全局）：删非保护中的 `DocumentUpload`、孤立 `ProcessingTask`；**无**创建时间门槛；**保留**「`DocumentUpload.status=pending` 且关联任务仍为 pending/processing」的上传（见 `repository.list_uploads_eligible_for_cleanup`） |
 | GET | `/{kb_id}/documents/tasks` | 按 `task_ids` 查询处理任务状态 |
-| GET | `/{kb_id}/documents/{doc_id}` | 文档详情 |
 | POST | `/{kb_id}/documents/{doc_id}/replace` | 同名重新上传，覆盖 MinIO 并增量更新向量；Query：`chunk_size`（默认 1000）、`chunk_overlap`（默认 200），须 `chunk_overlap < chunk_size` |
+| GET | `/{kb_id}/documents/{doc_id}` | 文档详情 |
 | DELETE | `/{kb_id}/documents/{doc_id}` | 删除单篇文档 |
 | POST | `/{kb_id}/documents/batch-delete` | 批量删除文档 |
-| POST | `/cleanup` | 清理临时上传（全局）：删非保护中的 `DocumentUpload`、孤立 `ProcessingTask`；**无**创建时间门槛；仅保留「`DocumentUpload.status=pending` 且关联任务仍为 pending/processing」 |
 | POST | `/test-retrieval` | 控制台检索测试（body 含 `kb_id`、`query` 等） |
 
 ## 对话模块 `/api/chat`

@@ -79,6 +79,7 @@ pnpm dev
 
 - [docs/README.md](docs/README.md)
 - [架构说明](docs/架构/后端项目架构说明.md)
+- [API 路由一览](docs/架构/API路由.md)
 - [业务流程总览](docs/业务流程/00-业务流程总览与索引.md)
 - [项目总览与路线](docs/总览/)
 

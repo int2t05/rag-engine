@@ -164,7 +164,7 @@ export default function EvaluationDetailPage() {
         </div>
       )}
 
-      <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <p className="text-xs text-gray-500">知识库</p>
           <p className="mt-1 text-sm font-medium text-gray-800">
@@ -179,14 +179,6 @@ export default function EvaluationDetailPage() {
           <p className="text-xs text-gray-500">评估类型</p>
           <p className="mt-1 text-sm font-medium text-gray-800">{task.evaluation_type}</p>
         </div>
-        {metrics && typeof metrics.ragas_score === "number" && (
-          <div className="rounded-xl border border-gray-200 bg-white p-4">
-            <p className="text-xs text-gray-500">RAGAS 综合分</p>
-            <p className="mt-1 text-lg font-semibold text-blue-600">
-              {formatScore(metrics.ragas_score as number)}
-            </p>
-          </div>
-        )}
       </div>
 
       <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4">
@@ -203,9 +195,7 @@ export default function EvaluationDetailPage() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-gray-600">
-            未指定自定义指标，将按评估类型使用后端默认指标集；任务完成后摘要中会列出实际计算的指标。
-          </p>
+          <p className="text-sm text-gray-600">任务完成后摘要中会列出实际计算的指标。</p>
         )}
       </div>
 
@@ -272,11 +262,6 @@ export default function EvaluationDetailPage() {
                 <div key={r.id} className="p-4 transition-colors hover:bg-gray-50/50">
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-xs text-gray-500">结果 #{idx + 1}</span>
-                    {r.ragas_score != null && (
-                      <span className="text-sm font-medium text-blue-600">
-                        RAGAS: {formatScore(r.ragas_score)}
-                      </span>
-                    )}
                   </div>
                   {tc && (
                     <div className="mb-2 rounded-lg bg-gray-50 p-2">

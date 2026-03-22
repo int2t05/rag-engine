@@ -8,6 +8,13 @@ export const DEFAULT_ALLOWED_METRICS: readonly string[] = [
   "answer_correctness",
 ];
 
+/** 与后端 METRICS_ALLOWED_BY_TYPE 一致：各评估类型可勾选的指标 */
+export const METRICS_BY_EVAL_TYPE: Record<string, readonly string[]> = {
+  full: [...DEFAULT_ALLOWED_METRICS],
+  retrieval: ["context_relevance", "context_precision", "context_recall"],
+  generation: ["faithfulness", "answer_relevance", "answer_correctness"],
+};
+
 /**
  * RAG 评估指标展示名（与后端 ALLOWED_METRICS 键一致）
  */

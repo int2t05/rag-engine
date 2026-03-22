@@ -18,7 +18,8 @@ EVALUATION_TYPES: List[str] = ["full", "retrieval", "generation"]
 # 各类型对应的指标
 RETRIEVAL_METRICS = ["context_relevance", "context_precision", "context_recall"]
 GENERATION_METRICS = ["faithfulness", "answer_relevance"]
-FULL_METRICS = RETRIEVAL_METRICS + GENERATION_METRICS
+# 完整评估默认包含全部六项（含答案正确性）
+FULL_METRICS = RETRIEVAL_METRICS + GENERATION_METRICS + ["answer_correctness"]
 
 # 允许在「自定义指标列表」中选用的全部指标（与 RAGAS collections 一致）
 ALLOWED_METRICS: List[str] = [
@@ -30,6 +31,13 @@ ALLOWED_METRICS: List[str] = [
     "answer_correctness",
 ]
 ALLOWED_METRICS_SET = frozenset(ALLOWED_METRICS)
+
+# 各评估类型下允许勾选的指标（自定义列表须为其子集）
+METRICS_ALLOWED_BY_TYPE: dict[str, frozenset[str]] = {
+    "full": ALLOWED_METRICS_SET,
+    "retrieval": frozenset(RETRIEVAL_METRICS),
+    "generation": frozenset(GENERATION_METRICS + ["answer_correctness"]),
+}
 
 # 结果表 / 汇总用到的分数字段（顺序固定，供循环聚合）
 SCORE_KEYS: Tuple[str, ...] = (
@@ -67,7 +75,7 @@ AVG_SUMMARY_KEYS: dict[str, str] = {
 EVALUATION_TYPE_METRICS: dict[str, List[str]] = {
     "full": FULL_METRICS,
     "retrieval": RETRIEVAL_METRICS,
-    "generation": GENERATION_METRICS,
+    "generation": GENERATION_METRICS + ["answer_correctness"],
 }
 
 # 类型 -> 是否执行检索
@@ -112,15 +120,28 @@ def validate_metric_list(names: List[str]) -> List[str]:
     return out
 
 
+def validate_metrics_for_eval_type(eval_type: str, names: List[str]) -> List[str]:
+    """校验所选指标均属于当前评估类型允许的集合。"""
+    et = (eval_type or "full").strip().lower()
+    allowed = METRICS_ALLOWED_BY_TYPE.get(et) or ALLOWED_METRICS_SET
+    bad = [n for n in names if n not in allowed]
+    if bad:
+        raise ValueError(
+            f"评估类型「{et}」不能使用指标 {bad}；该类型允许: {sorted(allowed)}"
+        )
+    return names
+
+
 def resolve_metrics(
     eval_type: str,
     selected: Optional[List[str]],
 ) -> List[str]:
     """
-    若 ``selected`` 非空，使用自定义指标；否则按评估类型默认列表。
+    若 ``selected`` 非空，使用自定义指标（须通过类型约束）；否则按评估类型默认列表。
     """
     if selected is not None and len(selected) > 0:
-        return validate_metric_list(selected)
+        normalized = validate_metric_list(selected)
+        return validate_metrics_for_eval_type(eval_type, normalized)
     return get_metrics_for_type(eval_type)
 
 
@@ -130,27 +151,27 @@ def get_evaluation_types_config() -> List[dict]:
         {
             "type": "full",
             "label": "完整评估",
-            "description": "检索 + 生成 + 全指标评分",
+            "description": "检索 + 生成；可从全部 RAGAS 指标中勾选",
             "metrics": FULL_METRICS,
-            "allowed_metrics": ALLOWED_METRICS,
+            "allowed_metrics": sorted(METRICS_ALLOWED_BY_TYPE["full"]),
             "needs_retrieval": True,
             "needs_generation": True,
         },
         {
             "type": "retrieval",
             "label": "检索评估",
-            "description": "仅检索 + 检索指标，专注优化检索",
+            "description": "仅检索侧：上下文相关性 / 精度 / 召回",
             "metrics": RETRIEVAL_METRICS,
-            "allowed_metrics": ALLOWED_METRICS,
+            "allowed_metrics": sorted(METRICS_ALLOWED_BY_TYPE["retrieval"]),
             "needs_retrieval": True,
             "needs_generation": False,
         },
         {
             "type": "generation",
             "label": "生成评估",
-            "description": "仅生成 + 生成指标，专注优化生成",
-            "metrics": GENERATION_METRICS,
-            "allowed_metrics": ALLOWED_METRICS,
+            "description": "检索 + 生成侧：忠实度、答案相关性、答案正确性等",
+            "metrics": EVALUATION_TYPE_METRICS["generation"],
+            "allowed_metrics": sorted(METRICS_ALLOWED_BY_TYPE["generation"]),
             "needs_retrieval": True,
             "needs_generation": True,
         },

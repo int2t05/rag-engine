@@ -48,6 +48,7 @@ _STOPPED_ONLY = "（已停止生成）"
 
 
 def _deepest_cause(exc: BaseException) -> BaseException:
+    """返回最底层的异常。"""
     cur: BaseException = exc
     while getattr(cur, "__cause__", None) is not None:
         cur = cur.__cause__  # type: ignore[assignment]
@@ -94,7 +95,9 @@ def _format_rag_user_message(exc: BaseException) -> str:
 
 def _format_docs(docs: List[Any]) -> str:
     """将检索到的文档列表格式化为上下文字符串"""
-    return "\n\n".join(f"[citation:{i+1}]\n{doc.page_content}" for i, doc in enumerate(docs))
+    return "\n\n".join(
+        f"[citation:{i+1}]\n{doc.page_content}" for i, doc in enumerate(docs)
+    )
 
 
 def _serialize_context(context_docs: List[Any]) -> str:
@@ -157,7 +160,9 @@ async def generate_response(
         可选协程，返回 True 表示客户端已断开（刷新、关闭页、前端 Abort）。
         用于停止生成并落库占位/已生成片段，避免长时间占用资源。
     """
+
     async def _client_gone() -> bool:
+        """检查客户端是否已断开"""
         if client_disconnected is None:
             return False
         try:
@@ -188,6 +193,7 @@ async def generate_response(
 
         vector_stores = []
         for kb in knowledge_bases:
+            # 在已有文档的知识库范围内做向量检索
             documents = (
                 db.query(Document).filter(Document.knowledge_base_id == kb.id).all()
             )
@@ -202,63 +208,62 @@ async def generate_response(
         if not vector_stores:
             error_msg = "我没有任何知识基础来帮助回答你的问题。"
             yield f"data: {json.dumps({'text': error_msg}, ensure_ascii=False)}\n"
-            yield "data: [DONE]\n"
+            yield "data: [DONE]\n"  # 结束标记
             bot_message.content = error_msg  # type: ignore
             db.commit()
             stream_finished_ok = True
             return
 
-        # 3. 使用第一个知识库的检索器（可扩展为多库合并）
+        # 3. 使用第一个知识库的检索器
+        # TODO：可扩展为多库合并
         retriever = vector_stores[0].as_retriever()
         llm = LLMFactory.create()
 
-        # 4. 构建 LCEL 链替代已废弃的 create_history_aware_retriever
-        #    问题重写链：根据对话历史将问题改写为独立问题
+        # 4. 构建 LCEL 链
+        #    问题重写链：根据对话历史将问题改写为独立问题(查询重写)
         contextualize_q_prompt = ChatPromptTemplate.from_messages(
             [
-                ("system",
-                 "Given a chat history and the latest user question "
-                 "which might reference context in the chat history, "
-                 "formulate a standalone question which can be understood "
-                 "without the chat history. Do NOT answer the question, just "
-                 "reformulate it if needed and otherwise return it as is."),
+                # “系统”，“给定聊天历史和最新的用户问题”，“可能引用聊天历史中的上下文”，“制定一个可以理解的独立问题”，“没有聊天历史”。不要回答问题，只要“如果需要，重新制定它，否则就原样返回。”
+                (
+                    "system",
+                    "Given a chat history and the latest user question "
+                    "which might reference context in the chat history, "
+                    "formulate a standalone question which can be understood "
+                    "without the chat history. Do NOT answer the question, just "
+                    "reformulate it if needed and otherwise return it as is.",
+                ),
                 MessagesPlaceholder("chat_history"),
                 ("human", "{input}"),
             ]
         )
 
         # 历史感知问题重写链（LCEL）
-        history_aware_rewrite = (
-            contextualize_q_prompt
-            | llm
-            | StrOutputParser()
-        )
+        history_aware_rewrite = contextualize_q_prompt | llm | StrOutputParser()
 
         # 5. QA 提示词（要求使用 [citation:N] 引用格式）
         qa_prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system",
-                 "You are given a user question, and please write clean, concise and accurate answer to the question. "
-                 "You will be given a set of related contexts to the question, which are numbered sequentially starting from 1. "
-                 "Each context has an implicit reference number based on its position in the array (first context is 1, second is 2, etc.). "
-                 "Please use these contexts and cite them using the format [citation:x] at the end of each sentence where applicable. "
-                 "Your answer must be correct, accurate and written by an expert using an unbiased and professional tone. "
-                 "Please limit to 1024 tokens. Do not give any information that is not related to the question, and do not repeat. "
-                 "Say 'information is missing on' followed by the related topic, if the given context do not provide sufficient information. "
-                 "If a sentence draws from multiple contexts, please list all applicable citations, like [citation:1][citation:2]. "
-                 "Other than code and specific names and citations, your answer must be written in the same language as the question. "
-                 "Be concise.\n\n{context}\n\n"
-                 "Remember: Cite contexts by their position number (1 for first context, 2 for second, etc.) and don't blindly "
-                 "repeat the contexts verbatim."),
+            [  # “系统”、“给你一个用户问题，请写出清晰、简洁、准确的答案。”“你会得到一组与问题相关的上下文，它们从1开始顺序编号。””“每个上下文都有一个基于其在数组中的位置的隐式引用号（第一个上下文是1，第二个是2，等等）。”“请使用这些上下文，并在每个句子的末尾使用[citation:x]格式引用它们。”“你的答案必须是正确、准确的，并且是由专家用公正和专业的语气写的。“请限制为1024个令牌。”不要给出任何与问题无关的信息，也不要重复。“如果给定的上下文没有提供足够的信息，就说‘information is missing on’，后面跟着相关的主题。”“如果一个句子引用了多个上下文，请列出所有适用的引用，如[引文：1][引文：2]。””“除了代码和特定的名称和引用之外，你的答案必须用与问题相同的语言书写。”“简明扼要。\n\n{context}\n\n“ ”记住：引用上下文的位置号（1代表第一个上下文，2代表第二个，等等），不要盲目地“ ”逐字重复上下文。"
+                (
+                    "system",
+                    "You are given a user question, and please write clean, concise and accurate answer to the question. "
+                    "You will be given a set of related contexts to the question, which are numbered sequentially starting from 1. "
+                    "Each context has an implicit reference number based on its position in the array (first context is 1, second is 2, etc.). "
+                    "Please use these contexts and cite them using the format [citation:x] at the end of each sentence where applicable. "
+                    "Your answer must be correct, accurate and written by an expert using an unbiased and professional tone. "
+                    "Please limit to 1024 tokens. Do not give any information that is not related to the question, and do not repeat. "
+                    "Say 'information is missing on' followed by the related topic, if the given context do not provide sufficient information. "
+                    "If a sentence draws from multiple contexts, please list all applicable citations, like [citation:1][citation:2]. "
+                    "Other than code and specific names and citations, your answer must be written in the same language as the question. "
+                    "Be concise.\n\n{context}\n\n"
+                    "Remember: Cite contexts by their position number (1 for first context, 2 for second, etc.) and don't blindly "
+                    "repeat the contexts verbatim.",
+                ),
                 MessagesPlaceholder("chat_history"),
                 ("human", "{question}"),
             ]
         )
 
-        # 6. 仅对「最终 QA」使用 LCEL；重写 + 检索不用嵌套 dict 并 astream
-        #    原因：LangChain 1.x 下 RunnableParallel（dict）在 astream 时会分片合并，
-        #    子步骤的 lambda 可能收到不完整输入，导致 x["question"] 等 KeyError。
-        #    显式 ainvoke 重写与检索，再对 qa_prompt|llm 做 astream，语义也更清晰。
+        # 6. 对「最终 QA」使用 LCEL
         answer_chain = qa_prompt | llm | StrOutputParser()
 
         # 7. 构建 chat_history 供 LangChain 使用
@@ -268,16 +273,18 @@ async def generate_response(
                 chat_history.append(HumanMessage(content=message["content"]))
             elif message["role"] == "assistant":
                 if "__LLM_RESPONSE__" in message["content"]:
-                    message["content"] = message["content"].split("__LLM_RESPONSE__")[-1]
+                    message["content"] = message["content"].split("__LLM_RESPONSE__")[
+                        -1
+                    ]
                 chat_history.append(AIMessage(content=message["content"]))
 
-        # 8. 历史感知：仅用重写后的问句做检索；回答仍针对用户本轮原话 question=query
+        # 8. 历史感知：用重写后的问句做检索；回答仍针对用户本轮原话 question=query
         if await _client_gone():
             bot_message.content = _STOPPED_ONLY  # type: ignore
             db.commit()
             yield "data: [DONE]\n"
             return
-
+        # 将对话历史融入查询，生成独立可懂的问句
         standalone_q = await history_aware_rewrite.ainvoke(
             {"input": query, "chat_history": chat_history}
         )
@@ -295,8 +302,11 @@ async def generate_response(
             len(retrieved_docs),
         )
 
+        # TODO: Rerank
+
         full_response = ""
         # 始终下发引用块（含空列表），便于前端展示「参考来源」并与首包仅含 Base64 时的状态更新一致
+        # Base64 编码后作为纯 ASCII 字符串传递更安全。
         base64_context = base64.b64encode(
             _serialize_context(retrieved_docs).encode()
         ).decode()
@@ -318,6 +328,7 @@ async def generate_response(
                 "chat_history": chat_history,
             }
         ):
+            # 每次循环检查客户端是否已断开，节省 Token
             if await _client_gone():
                 if full_response.strip():
                     bot_message.content = full_response + _CANCELLED_SUFFIX  # type: ignore
