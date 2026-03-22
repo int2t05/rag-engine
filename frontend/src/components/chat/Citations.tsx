@@ -10,43 +10,49 @@ import { PATH } from "@/lib/routes";
 interface CitationsProps {
   /** 引用列表 */
   citations: Citation[];
+  /** 传入时，引用详情链接带 ?chat=，便于返回对话 */
+  chatId?: number;
 }
 
-function chunkDetailHref(meta: Record<string, unknown>): string | null {
+function chunkDetailHref(meta: Record<string, unknown>, chatId?: number): string | null {
   const kb = meta.kb_id;
   const cid = meta.chunk_id;
   if (typeof kb !== "number" && typeof kb !== "string") return null;
   const kbNum = typeof kb === "number" ? kb : parseInt(String(kb), 10);
   if (!Number.isFinite(kbNum)) return null;
   if (cid === undefined || cid === null || cid === "") return null;
-  return PATH.chunkDetail(kbNum, String(cid));
+  const base = PATH.chunkDetail(kbNum, String(cid));
+  if (chatId != null && Number.isFinite(chatId)) {
+    return `${base}?chat=${chatId}`;
+  }
+  return base;
 }
 
 /**
  * 引用来源组件
  * @description 展示检索到的参考文档片段
  */
-export function Citations({ citations }: CitationsProps) {
+export function Citations({ citations, chatId }: CitationsProps) {
   if (!citations || citations.length === 0) {
     return null;
   }
 
   return (
-    <div className="mt-3 pt-3 border-t border-gray-200">
-      <div className="text-xs text-gray-500 mb-2 font-medium">参考来源</div>
+    <div className="mt-3 border-t border-border pt-3">
+      <div className="mb-2 text-xs font-medium text-muted">参考来源</div>
       <div className="space-y-2">
         {citations.map((citation) => {
-          const href = chunkDetailHref(citation.metadata);
+          const href = chunkDetailHref(citation.metadata, chatId);
           return (
             <div
               key={citation.index}
-              className="text-xs rounded border border-gray-100 bg-gray-50 p-2"
+              className="text-xs rounded border border-border bg-surface-muted p-2"
             >
               <div className="flex items-start gap-2">
-                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded bg-blue-100 text-[10px] font-medium text-blue-600">
+                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded bg-accent-muted text-[10px] font-medium text-accent">
                   {citation.index}
                 </span>
-                <span className="line-clamp-2 text-gray-600">
+                <span className="line-clamp-2 text-muted">
                   {citation.page_content.substring(0, 150)}
                   {citation.page_content.length > 150 ? "..." : ""}
                 </span>
@@ -57,7 +63,7 @@ export function Citations({ citations }: CitationsProps) {
                   citation.metadata?.file_name ??
                   citation.metadata?.filename;
                 return src ? (
-                  <div className="mt-1 truncate text-[10px] text-gray-400" title={String(src)}>
+                  <div className="mt-1 truncate text-[10px] text-muted/80" title={String(src)}>
                     来源: {String(src)}
                   </div>
                 ) : null;
@@ -66,9 +72,7 @@ export function Citations({ citations }: CitationsProps) {
                 <div className="mt-1.5">
                   <Link
                     href={href}
-                    className="text-[10px] font-medium text-blue-600 hover:underline"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    className="text-[10px] font-medium text-accent hover:underline"
                   >
                     查看引用详情
                   </Link>

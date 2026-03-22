@@ -10,13 +10,15 @@ import { Citations } from "./Citations";
 interface MessageBubbleProps {
   /** 消息数据 */
   message: ChatMessage;
+  /** 当前对话 ID，用于引用详情页「返回对话」 */
+  chatId?: number;
 }
 
 /**
  * 消息气泡组件
  * @description 渲染单条聊天消息，包括文本内容和引用来源
  */
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, chatId }: MessageBubbleProps) {
   const isUser = message.role === "user";
 
   return (
@@ -24,8 +26,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       <div
         className={`max-w-[85%] md:max-w-2xl rounded-2xl px-4 py-3 ${
           isUser
-            ? "bg-blue-600 text-white rounded-br-md"
-            : "bg-white border border-gray-200 text-gray-800 rounded-bl-md shadow-sm"
+            ? "bg-accent text-surface rounded-br-md"
+            : "border border-border bg-surface text-ink rounded-bl-md shadow-sm"
         }`}
       >
         {/* 消息内容 */}
@@ -37,7 +39,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
         {/* 引用来源（仅助手消息） */}
         {!isUser && message.citations && message.citations.length > 0 && (
-          <Citations citations={message.citations} />
+          <Citations citations={message.citations} chatId={chatId} />
         )}
       </div>
     </div>

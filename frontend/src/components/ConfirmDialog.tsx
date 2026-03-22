@@ -77,7 +77,7 @@ export function ConfirmDialog({
   const btnClass =
     variant === "danger"
       ? "bg-red-600 hover:bg-red-700 focus:ring-red-500"
-      : "bg-blue-600 hover:bg-blue-700 focus:ring-blue-500";
+      : "bg-accent hover:bg-accent-hover focus:ring-accent";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -90,17 +90,17 @@ export function ConfirmDialog({
 
       {/* 对话框内容 */}
       <div
-        className="relative bg-white rounded-xl shadow-xl w-full max-w-sm p-6 animate-scale-in"
+        className="relative w-full max-w-sm animate-scale-in rounded-xl bg-surface p-6 shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="dialog-title"
       >
-        <h3 id="dialog-title" className="text-lg font-semibold text-gray-900">
+        <h3 id="dialog-title" className="text-lg font-semibold text-ink">
           {title}
         </h3>
 
         {description && (
-          <p className="mt-2 text-sm text-gray-500 leading-relaxed">
+          <p className="mt-2 text-sm leading-relaxed text-muted">
             {description}
           </p>
         )}
@@ -110,7 +110,7 @@ export function ConfirmDialog({
             type="button"
             onClick={onCancel}
             disabled={loading}
-            className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+            className="rounded-lg px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-surface-muted disabled:opacity-50"
           >
             {cancelText}
           </button>
@@ -119,7 +119,7 @@ export function ConfirmDialog({
             ref={confirmRef}
             onClick={onConfirm}
             disabled={loading}
-            className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${btnClass}`}
+            className={`rounded-lg px-4 py-2 text-sm font-medium text-surface transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${btnClass}`}
           >
             {loading ? "处理中..." : confirmText}
           </button>

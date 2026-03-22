@@ -49,9 +49,9 @@ export function NewChatModal({
   if (!visible) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto animate-scale-in">
-        <h2 className="text-lg font-bold text-gray-900 mb-4">新建对话</h2>
+    <div className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-md animate-scale-in overflow-y-auto rounded-xl bg-surface p-6 shadow-xl">
+        <h2 className="mb-4 text-lg font-bold text-ink">新建对话</h2>
 
         {/* 错误提示 */}
         {error && (
@@ -64,45 +64,45 @@ export function NewChatModal({
         <div className="space-y-4">
           {/* 对话标题 */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+            <label className="mb-1.5 block text-sm font-medium text-ink">
               对话标题{" "}
-              <span className="font-normal text-gray-500">（可选）</span>
+              <span className="font-normal text-muted">（可选）</span>
             </label>
             <input
               type="text"
               value={title}
               onChange={(e) => onTitleChange(e.target.value)}
               placeholder="留空则自动命名为「新对话 · 月/日 时:分」"
-              className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full rounded-lg border border-border px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
             />
-            <p className="text-[11px] text-gray-500 mt-1.5">
+            <p className="mt-1.5 text-[11px] text-muted">
               填写后将作为列表中显示的名称；不填则由系统按时间生成，便于区分多条「新对话」。
             </p>
           </div>
 
           {/* 选择知识库 */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="mb-2 block text-sm font-medium text-ink">
               选择知识库（可多选）
             </label>
-            <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-2">
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
               {kbOptions.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-4">
+                <p className="py-4 text-center text-sm text-muted">
                   暂无可用知识库，请先创建知识库并上传文档
                 </p>
               ) : (
                 kbOptions.map((kb) => (
                   <label
                     key={kb.id}
-                    className="flex items-center gap-2.5 p-2 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
+                    className="flex cursor-pointer items-center gap-2.5 rounded-lg p-2 transition-colors hover:bg-surface-muted"
                   >
                     <input
                       type="checkbox"
                       checked={selectedKbs.includes(kb.id)}
                       onChange={() => onKbToggle(kb.id)}
-                      className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                      className="h-4 w-4 rounded border-border text-accent focus:ring-accent"
                     />
-                    <span className="text-sm text-gray-700">{kb.name}</span>
+                    <span className="text-sm text-ink">{kb.name}</span>
                   </label>
                 ))
               )}
@@ -111,17 +111,17 @@ export function NewChatModal({
         </div>
 
         {/* 操作按钮 */}
-        <div className="flex justify-end gap-3 mt-6">
+        <div className="mt-6 flex justify-end gap-3">
           <button
             onClick={onCancel}
-            className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            className="rounded-lg px-4 py-2 text-sm text-muted transition-colors hover:bg-surface-muted"
           >
             取消
           </button>
           <button
             onClick={onCreate}
             disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-surface transition-colors hover:bg-accent-hover disabled:opacity-50"
           >
             {loading ? "创建中..." : "创建"}
           </button>

@@ -77,12 +77,12 @@ body {
 
 .scrollbar-thin::-webkit-scrollbar { width: 5px; }
 .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
-.scrollbar-thin::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 9999px; }
-.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #e4e2dd; border-radius: 9999px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #d1cfc9; }
 
 /* ---------- markdown content ---------- */
 
-.md-content { font-size: 0.875rem; line-height: 1.7; color: #1f2937; }
+.md-content { font-size: 0.875rem; line-height: 1.7; color: #0c0f14; }
 .md-content .md-p { margin-bottom: 0.5em; }
 .md-content .md-p:last-child { margin-bottom: 0; }
 .md-content .md-h1 { font-size: 1.25rem; font-weight: 700; margin: 1em 0 0.5em; }
@@ -93,7 +93,7 @@ body {
 .md-content .md-h6 { font-size: 0.875rem; font-weight: 600; margin: 0.5em 0 0.25em; }
 
 .md-content .md-inline-code {
-  background: #f3f4f6; color: #dc2626; font-size: 0.8125rem;
+  background: #f1f0ed; color: #dc2626; font-size: 0.8125rem;
   padding: 0.15em 0.4em; border-radius: 4px; font-family: ui-monospace, monospace;
 }
 .md-content .md-code-block {
@@ -124,11 +124,11 @@ body {
 .md-content .md-ul li,
 .md-content .md-ol li { margin: 0.15em 0; }
 .md-content .md-blockquote {
-  border-left: 3px solid #d1d5db; padding: 0.25em 0 0.25em 0.75em;
-  color: #6b7280; margin: 0.5em 0;
+  border-left: 3px solid #e4e2dd; padding: 0.25em 0 0.25em 0.75em;
+  color: #6b6862; margin: 0.5em 0;
 }
 .md-content .md-hr {
-  border: none; border-top: 1px solid #e5e7eb; margin: 0.75em 0;
+  border: none; border-top: 1px solid #e4e2dd; margin: 0.75em 0;
 }
 
 /* user message markdown overrides */

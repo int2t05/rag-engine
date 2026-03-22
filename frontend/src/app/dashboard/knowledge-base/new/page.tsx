@@ -66,22 +66,22 @@ export default function NewKnowledgeBasePage() {
       <div className="mb-6">
         <Link
           href={PATH.knowledgeBase}
-          className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1"
+          className="text-sm text-muted hover:text-ink transition-colors inline-flex items-center gap-1"
         >
           <ArrowLeftIcon className="w-4 h-4" />
           返回列表
         </Link>
-        <h1 className="text-2xl font-bold text-gray-800 mt-2">新建知识库</h1>
+        <h1 className="text-2xl font-bold text-ink mt-2">新建知识库</h1>
       </div>
 
       {/* 表单 */}
       <form
         onSubmit={handleSubmit}
-        className="bg-white rounded-lg border border-gray-200 p-6 space-y-5"
+        className="bg-surface rounded-lg border border-border p-6 space-y-5"
       >
         {/* 名称 */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium text-ink mb-1.5">
             知识库名称 <span className="text-red-500">*</span>
           </label>
           <input
@@ -90,21 +90,21 @@ export default function NewKnowledgeBasePage() {
             onChange={(e) => setName(e.target.value)}
             placeholder="例如：产品手册、内部规范（必填）"
             maxLength={255}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full border border-border rounded-lg px-3 py-2.5 text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
           />
         </div>
 
-        <div className="flex items-start gap-2 rounded-lg border border-gray-100 bg-gray-50/80 p-3">
+        <div className="flex items-start gap-2 rounded-lg border border-border bg-surface-muted/80 p-3">
           <input
             id="kb-pc-new"
             type="checkbox"
             checked={parentChildChunking}
             onChange={(e) => setParentChildChunking(e.target.checked)}
-            className="mt-0.5 rounded border-gray-300"
+            className="mt-0.5 rounded border-border"
           />
-          <label htmlFor="kb-pc-new" className="text-sm text-gray-700">
+          <label htmlFor="kb-pc-new" className="text-sm text-ink">
             <span className="font-medium">父子分块入库</span>
-            <span className="mt-0.5 block text-xs text-gray-500">
+            <span className="mt-0.5 block text-xs text-muted">
               开启后新文档仅将子块写入向量库，父块存 MySQL；对话中仍需勾选「父子块展开」才会用父块全文回答。
             </span>
           </label>
@@ -112,7 +112,7 @@ export default function NewKnowledgeBasePage() {
 
         {/* 描述 */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium text-ink mb-1.5">
             描述
           </label>
           <textarea
@@ -120,7 +120,7 @@ export default function NewKnowledgeBasePage() {
             onChange={(e) => setDescription(e.target.value)}
             placeholder="留空则不保存描述；可写用途、文档范围等便于日后识别"
             rows={4}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+            className="w-full border border-border rounded-lg px-3 py-2.5 text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent resize-none"
           />
         </div>
 
@@ -136,13 +136,13 @@ export default function NewKnowledgeBasePage() {
           <button
             type="submit"
             disabled={loading}
-            className="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            className="bg-accent text-surface px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors disabled:cursor-not-allowed disabled:bg-border"
           >
             {loading ? "创建中..." : "创建知识库"}
           </button>
           <Link
             href={PATH.knowledgeBase}
-            className="px-5 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+            className="px-5 py-2.5 rounded-lg text-sm font-medium text-muted hover:bg-surface-muted transition-colors"
           >
             取消
           </Link>

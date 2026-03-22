@@ -659,7 +659,11 @@ def get_document_detail(
     if not document:
         raise ResourceNotFoundError("文件未找到")
 
+    kb = repo.get_owned_kb(kb_id, user_id)
+    parent_child = bool(kb and kb.parent_child_chunking)
     chunk_count = repo.count_chunks(doc_id)
+    parent_n = repo.count_parent_chunks(doc_id) if parent_child else 0
+    child_n = max(0, chunk_count - parent_n) if parent_child else chunk_count
     return DocumentResponse(
         id=document.id,
         file_name=document.file_name,
@@ -672,6 +676,9 @@ def get_document_detail(
         updated_at=document.updated_at,
         processing_tasks=document.processing_tasks,
         chunk_count=chunk_count,
+        parent_chunk_count=parent_n if parent_child else None,
+        child_chunk_count=child_n if parent_child else None,
+        parent_child_chunking=parent_child,
     )
 
 

@@ -63,9 +63,9 @@ export function Toast({
 
   // 类型对应的样式
   const bgMap = {
-    success: "bg-green-600",
+    success: "bg-accent",
     error: "bg-red-600",
-    info: "bg-blue-600",
+    info: "bg-ink",
   };
 
   // 类型对应的图标

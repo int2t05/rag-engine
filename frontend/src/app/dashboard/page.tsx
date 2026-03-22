@@ -87,7 +87,7 @@ export default function DashboardPage() {
               href={q.href}
               className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
                 q.primary
-                  ? "bg-accent text-white hover:bg-accent-hover"
+                  ? "bg-accent text-surface hover:bg-accent-hover"
                   : "border border-border bg-surface-muted text-ink hover:bg-border/40"
               }`}
             >

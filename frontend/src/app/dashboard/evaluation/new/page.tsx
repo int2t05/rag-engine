@@ -250,23 +250,23 @@ export default function NewEvaluationPage() {
       <div className="mb-6">
         <Link
           href={PATH.evaluation}
-          className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1"
+          className="text-sm text-muted hover:text-ink transition-colors inline-flex items-center gap-1"
         >
           <ArrowLeftIcon className="w-4 h-4" />
           返回列表
         </Link>
-        <h1 className="text-2xl font-bold text-gray-800 mt-2">新建 RAG 评估</h1>
-        <p className="text-sm text-gray-500 mt-1">
+        <h1 className="text-2xl font-bold text-ink mt-2">新建 RAG 评估</h1>
+        <p className="text-sm text-muted mt-1">
           配置知识库、评估类型与测试用例
         </p>
       </div>
 
       <form
         onSubmit={handleSubmit}
-        className="bg-white rounded-xl border border-gray-200 p-6 space-y-6"
+        className="bg-surface rounded-xl border border-border p-6 space-y-6"
       >
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium text-ink mb-1.5">
             任务名称 <span className="text-red-500">*</span>
           </label>
           <input
@@ -274,12 +274,12 @@ export default function NewEvaluationPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="例如：知识库 A 首次评估"
-            className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full border border-border rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium text-ink mb-1.5">
             描述
           </label>
           <textarea
@@ -287,12 +287,12 @@ export default function NewEvaluationPage() {
             onChange={(e) => setDescription(e.target.value)}
             placeholder="留空则不保存描述"
             rows={2}
-            className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+            className="w-full border border-border rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent resize-none"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium text-ink mb-1.5">
             关联知识库
           </label>
           <select
@@ -302,7 +302,7 @@ export default function NewEvaluationPage() {
                 e.target.value ? Number(e.target.value) : null,
               )
             }
-            className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full border border-border rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
           >
             <option value="">
               不关联知识库（仅根据下方测试用例评估）
@@ -317,7 +317,7 @@ export default function NewEvaluationPage() {
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+            <label className="block text-sm font-medium text-ink mb-1.5">
               Top-K（检索条数）
             </label>
             <input
@@ -329,24 +329,24 @@ export default function NewEvaluationPage() {
               }
               placeholder={`默认 ${DEFAULT_TOP_K}`}
               title={`留空则使用 ${DEFAULT_TOP_K}，与后端默认一致`}
-              className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full border border-border rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
             />
-            <p className="text-[11px] text-gray-500 mt-1.5">
+            <p className="text-[11px] text-muted mt-1.5">
               每条测试问题从向量库取前 K 个片段；不填则 {DEFAULT_TOP_K}（可填 1–50）。
             </p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+            <label className="block text-sm font-medium text-ink mb-1.5">
               评估模式
             </label>
-            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-sm text-gray-800">
+            <div className="rounded-lg border border-border bg-surface-muted px-3.5 py-2.5 text-sm text-ink">
               {currentEvalType?.label ?? "全流程检索与生成"}
               {currentEvalType?.description ? (
-                <span className="block text-xs text-gray-500 mt-1">
+                <span className="block text-xs text-muted mt-1">
                   {currentEvalType.description}
                 </span>
               ) : (
-                <span className="block text-xs text-gray-500 mt-1">
+                <span className="block text-xs text-muted mt-1">
                   向量检索与答案生成一并评估，可在下方勾选具体指标。
                 </span>
               )}
@@ -354,10 +354,10 @@ export default function NewEvaluationPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-3">
+        <div className="rounded-xl border border-border bg-surface-muted/80 p-4 space-y-3">
           <div>
-            <p className="text-sm font-medium text-gray-800">评分模型（RAGAS）</p>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="text-sm font-medium text-ink">评分模型（RAGAS）</p>
+            <p className="text-xs text-muted mt-0.5">
               默认与「模型配置」中当前启用项一致；可单独指定 OpenAI 兼容接口或 Ollama 作为判分模型。自定义端点下可填写专用
               API Key；留空则对话/嵌入密钥仍用全局「模型配置」。
             </p>
@@ -369,9 +369,9 @@ export default function NewEvaluationPage() {
                 name="judgeMode"
                 checked={judgeMode === "global"}
                 onChange={() => setJudgeMode("global")}
-                className="text-blue-600"
+                className="text-accent"
               />
-              <span className="text-gray-800">跟随全局配置</span>
+              <span className="text-ink">跟随全局配置</span>
             </label>
             <label className="inline-flex items-center gap-2 cursor-pointer">
               <input
@@ -379,15 +379,15 @@ export default function NewEvaluationPage() {
                 name="judgeMode"
                 checked={judgeMode === "custom"}
                 onChange={() => setJudgeMode("custom")}
-                className="text-blue-600"
+                className="text-accent"
               />
-              <span className="text-gray-800">自定义评分端点</span>
+              <span className="text-ink">自定义评分端点</span>
             </label>
           </div>
           {judgeMode === "custom" && (
-            <div className="space-y-3 pt-1 border-t border-gray-200">
+            <div className="space-y-3 pt-1 border-t border-border">
               <div>
-                <p className="text-xs font-medium text-gray-700 mb-2">评分对话模型</p>
+                <p className="text-xs font-medium text-ink mb-2">评分对话模型</p>
                 <div className="flex flex-wrap gap-3 mb-2">
                   <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
                     <input
@@ -416,7 +416,7 @@ export default function NewEvaluationPage() {
                       onChange={(e) => setJudgeOpenaiBase(e.target.value)}
                       placeholder="API Base（可空则沿用全局）"
                       autoComplete="off"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm"
                     />
                     <input
                       type="text"
@@ -424,10 +424,10 @@ export default function NewEvaluationPage() {
                       onChange={(e) => setJudgeOpenaiModel(e.target.value)}
                       placeholder="模型名（可空则沿用全局）"
                       autoComplete="off"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm"
                     />
                     <div className="sm:col-span-2">
-                      <label className="block text-xs text-gray-500 mb-1">
+                      <label className="block text-xs text-muted mb-1">
                         API Key（可选，用于智谱等独立网关；留空则用全局配置中的 Key）
                       </label>
                       <input
@@ -436,7 +436,7 @@ export default function NewEvaluationPage() {
                         onChange={(e) => setJudgeOpenaiKey(e.target.value)}
                         placeholder="sk-… 或智谱 API Key"
                         autoComplete="new-password"
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        className="w-full border border-border rounded-lg px-3 py-2 text-sm"
                       />
                     </div>
                   </div>
@@ -447,24 +447,24 @@ export default function NewEvaluationPage() {
                       value={judgeOllamaBase}
                       onChange={(e) => setJudgeOllamaBase(e.target.value)}
                       placeholder="Ollama 地址，如 http://localhost:11434"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm"
                     />
                     <input
                       type="text"
                       value={judgeOllamaModel}
                       onChange={(e) => setJudgeOllamaModel(e.target.value)}
                       placeholder="模型名"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm"
                     />
                   </div>
                 )}
               </div>
-              <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+              <label className="flex items-center gap-2 text-xs text-ink cursor-pointer">
                 <input
                   type="checkbox"
                   checked={judgeEmbedCustom}
                   onChange={(e) => setJudgeEmbedCustom(e.target.checked)}
-                  className="rounded border-gray-300"
+                  className="rounded border-border"
                 />
                 单独指定评分用嵌入模型（答案相关性 / 答案正确性等指标需要；不勾选则沿用全局嵌入）
               </label>
@@ -498,7 +498,7 @@ export default function NewEvaluationPage() {
                         onChange={(e) => setJudgeOpenaiEmbBase(e.target.value)}
                         placeholder="嵌入 API Base"
                         autoComplete="off"
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        className="w-full border border-border rounded-lg px-3 py-2 text-sm"
                       />
                       <input
                         type="text"
@@ -506,10 +506,10 @@ export default function NewEvaluationPage() {
                         onChange={(e) => setJudgeOpenaiEmbModel(e.target.value)}
                         placeholder="嵌入模型名"
                         autoComplete="off"
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        className="w-full border border-border rounded-lg px-3 py-2 text-sm"
                       />
                       <div className="sm:col-span-2">
-                        <label className="block text-xs text-gray-500 mb-1">
+                        <label className="block text-xs text-muted mb-1">
                           嵌入 API Key（可选；留空则优先用上方对话 Key，否则全局嵌入 Key）
                         </label>
                         <input
@@ -518,7 +518,7 @@ export default function NewEvaluationPage() {
                           onChange={(e) => setJudgeOpenaiEmbKey(e.target.value)}
                           placeholder="与对话 Key 不同时填写"
                           autoComplete="new-password"
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                          className="w-full border border-border rounded-lg px-3 py-2 text-sm"
                         />
                       </div>
                     </div>
@@ -529,14 +529,14 @@ export default function NewEvaluationPage() {
                         value={judgeOllamaEmbBase}
                         onChange={(e) => setJudgeOllamaEmbBase(e.target.value)}
                         placeholder="Ollama 地址"
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        className="w-full border border-border rounded-lg px-3 py-2 text-sm"
                       />
                       <input
                         type="text"
                         value={judgeOllamaEmbModel}
                         onChange={(e) => setJudgeOllamaEmbModel(e.target.value)}
                         placeholder="嵌入模型名"
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        className="w-full border border-border rounded-lg px-3 py-2 text-sm"
                       />
                     </div>
                   )}
@@ -546,10 +546,10 @@ export default function NewEvaluationPage() {
           )}
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-3">
+        <div className="rounded-xl border border-border bg-surface-muted/80 p-4 space-y-3">
           <div>
-            <p className="text-sm font-medium text-gray-800">评估指标</p>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="text-sm font-medium text-ink">评估指标</p>
+            <p className="text-xs text-muted mt-0.5">
               全流程评估下可从下列六项 RAGAS 指标中勾选；默认与类型预设一致，可按需增减。
             </p>
           </div>
@@ -564,14 +564,14 @@ export default function NewEvaluationPage() {
                     : [...allowedMetricIds],
                 )
               }
-              className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+              className="text-xs px-2.5 py-1 rounded-lg border border-border bg-surface text-ink hover:bg-surface-muted"
             >
               恢复类型默认
             </button>
             <button
               type="button"
               onClick={() => setSelectedMetrics([...allowedMetricIds])}
-              className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+              className="text-xs px-2.5 py-1 rounded-lg border border-border bg-surface text-ink hover:bg-surface-muted"
             >
               全选（本类型允许范围内）
             </button>
@@ -585,8 +585,8 @@ export default function NewEvaluationPage() {
                   key={id}
                   className={`flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm cursor-pointer transition-colors ${
                     checked
-                      ? "border-blue-400 bg-blue-50/60"
-                      : "border-gray-200 bg-white hover:border-gray-300"
+                      ? "border-accent bg-accent-muted/80"
+                      : "border-border bg-surface hover:border-border"
                   }`}
                 >
                   <input
@@ -599,10 +599,10 @@ export default function NewEvaluationPage() {
                           : [...prev, id],
                       )
                     }
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    className="rounded border-border text-accent focus:ring-accent"
                   />
-                  <span className="text-gray-800">{METRIC_LABELS[id] ?? id}</span>
-                  <span className="text-[10px] text-gray-400 font-mono ml-auto truncate max-w-[40%]">
+                  <span className="text-ink">{METRIC_LABELS[id] ?? id}</span>
+                  <span className="text-[10px] text-muted font-mono ml-auto truncate max-w-[40%]">
                     {id}
                   </span>
                 </label>
@@ -613,7 +613,7 @@ export default function NewEvaluationPage() {
 
         <div>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <label className="block text-sm font-medium text-gray-700">
+            <label className="block text-sm font-medium text-ink">
               测试用例 <span className="text-red-500">*</span>
             </label>
             <div className="flex flex-wrap items-center gap-2">
@@ -627,51 +627,51 @@ export default function NewEvaluationPage() {
               <button
                 type="button"
                 onClick={() => jsonFileInputRef.current?.click()}
-                className="inline-flex items-center gap-1 text-sm text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white"
+                className="inline-flex items-center gap-1 text-sm text-ink hover:text-ink border border-border rounded-lg px-2.5 py-1.5 bg-surface"
               >
                 从 JSON 导入
               </button>
               <button
                 type="button"
                 onClick={addTestCase}
-                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
+                className="inline-flex items-center gap-1 text-sm text-accent hover:text-accent-hover"
               >
                 <PlusIcon className="w-4 h-4" />
                 添加
               </button>
             </div>
           </div>
-          <label className="flex items-center gap-2 text-xs text-gray-600 mb-2 cursor-pointer select-none">
+          <label className="flex items-center gap-2 text-xs text-muted mb-2 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={replaceOnImport}
               onChange={(e) => setReplaceOnImport(e.target.checked)}
-              className="rounded border-gray-300"
+              className="rounded border-border"
             />
             导入时替换当前列表（不勾选则追加到末尾）
           </label>
           <button
             type="button"
             onClick={() => setShowJsonHint((v) => !v)}
-            className="text-xs text-blue-600 hover:underline mb-2"
+            className="text-xs text-accent hover:underline mb-2"
           >
             {showJsonHint ? "收起" : "查看"} JSON 格式说明
           </button>
           {showJsonHint && (
-            <div className="mb-3 p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-700 space-y-2">
+            <div className="mb-3 p-3 bg-surface-muted border border-border rounded-lg text-xs text-ink space-y-2">
               <p>
                 支持顶层数组，或包含{" "}
-                <code className="bg-gray-200 px-1 rounded">test_cases</code> /{" "}
-                <code className="bg-gray-200 px-1 rounded">items</code> /{" "}
-                <code className="bg-gray-200 px-1 rounded">qa</code> /{" "}
-                <code className="bg-gray-200 px-1 rounded">examples</code>{" "}
+                <code className="rounded bg-surface-muted px-1">test_cases</code> /{" "}
+                <code className="rounded bg-surface-muted px-1">items</code> /{" "}
+                <code className="rounded bg-surface-muted px-1">qa</code> /{" "}
+                <code className="rounded bg-surface-muted px-1">examples</code>{" "}
                 的对象。问题可用{" "}
-                <code className="bg-gray-200 px-1 rounded">query</code>、
-                <code className="bg-gray-200 px-1 rounded">question</code> 等字段；参考答案可用{" "}
-                <code className="bg-gray-200 px-1 rounded">reference</code>、
-                <code className="bg-gray-200 px-1 rounded">answer</code> 等。
+                <code className="rounded bg-surface-muted px-1">query</code>、
+                <code className="rounded bg-surface-muted px-1">question</code> 等字段；参考答案可用{" "}
+                <code className="rounded bg-surface-muted px-1">reference</code>、
+                <code className="rounded bg-surface-muted px-1">answer</code> 等。
               </p>
-              <pre className="whitespace-pre-wrap overflow-x-auto p-2 bg-white border border-gray-200 rounded text-[11px] leading-relaxed">
+              <pre className="whitespace-pre-wrap overflow-x-auto p-2 bg-surface border border-border rounded text-[11px] leading-relaxed">
                 {EVALUATION_QA_JSON_EXAMPLE}
               </pre>
             </div>
@@ -685,15 +685,15 @@ export default function NewEvaluationPage() {
             {testCases.map((tc, idx) => (
               <div
                 key={idx}
-                className="border border-gray-200 rounded-lg p-4 space-y-2 bg-gray-50/50"
+                className="border border-border rounded-lg p-4 space-y-2 bg-surface-muted/50"
               >
                 <div className="flex justify-between items-center">
-                  <span className="text-xs text-gray-500">用例 #{idx + 1}</span>
+                  <span className="text-xs text-muted">用例 #{idx + 1}</span>
                   <button
                     type="button"
                     onClick={() => removeTestCase(idx)}
                     disabled={testCases.length <= 1}
-                    className="text-gray-400 hover:text-red-500 disabled:opacity-50"
+                    className="text-muted hover:text-red-500 disabled:opacity-50"
                   >
                     <TrashIcon className="w-4 h-4" />
                   </button>
@@ -703,7 +703,7 @@ export default function NewEvaluationPage() {
                   value={tc.query}
                   onChange={(e) => updateTestCase(idx, "query", e.target.value)}
                   placeholder="问题（必填）"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                 />
                 <input
                   type="text"
@@ -712,7 +712,7 @@ export default function NewEvaluationPage() {
                     updateTestCase(idx, "reference", e.target.value)
                   }
                   placeholder="参考答案（可选，留空则部分指标不参与）"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                 />
               </div>
             ))}
@@ -729,13 +729,13 @@ export default function NewEvaluationPage() {
           <button
             type="submit"
             disabled={loading}
-            className="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="bg-accent text-surface px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-accent-hover disabled:opacity-50 transition-colors"
           >
             {loading ? "创建中..." : "创建评估"}
           </button>
           <Link
             href={PATH.evaluation}
-            className="px-5 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+            className="px-5 py-2.5 rounded-lg text-sm font-medium text-muted hover:bg-surface-muted transition-colors"
           >
             取消
           </Link>

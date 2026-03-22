@@ -96,7 +96,7 @@ export default function KnowledgeBasePage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="animate-pulse text-gray-400">加载中...</div>
+        <div className="animate-pulse text-muted">加载中...</div>
       </div>
     );
   }
@@ -106,14 +106,14 @@ export default function KnowledgeBasePage() {
       {/* ========== 页面标题栏 ========== */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">知识库管理</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-bold text-ink">知识库管理</h1>
+          <p className="text-sm text-muted mt-1">
             管理你的知识库，上传文档并进行问答
           </p>
         </div>
         <Link
           href={PATH.knowledgeBaseNew}
-          className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          className="inline-flex items-center gap-2 bg-accent text-surface px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors"
         >
           <PlusIcon className="w-4 h-4" />
           新建知识库
@@ -129,19 +129,19 @@ export default function KnowledgeBasePage() {
 
       {/* ========== 空状态 ========== */}
       {list.length === 0 && !error ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-          <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <BookIcon className="w-8 h-8 text-gray-400" />
+        <div className="bg-surface rounded-xl border border-border p-12 text-center">
+          <div className="w-16 h-16 bg-surface-muted rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <BookIcon className="w-8 h-8 text-muted" />
           </div>
-          <h3 className="text-lg font-semibold text-gray-800 mb-2">
+          <h3 className="text-lg font-semibold text-ink mb-2">
             还没有知识库
           </h3>
-          <p className="text-gray-500 mb-6 text-sm">
+          <p className="text-muted mb-6 text-sm">
             创建你的第一个知识库，开始上传文档并进行问答
           </p>
           <Link
             href={PATH.knowledgeBaseNew}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+            className="inline-flex items-center gap-2 bg-accent text-surface px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors"
           >
             <PlusIcon className="w-4 h-4" />
             创建知识库
@@ -153,25 +153,25 @@ export default function KnowledgeBasePage() {
           {list.map((kb) => (
             <div
               key={kb.id}
-              className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow group"
+              className="bg-surface rounded-xl border border-border p-5 hover:shadow-md transition-shadow group"
             >
               {/* 标题 */}
               <div className="flex items-start justify-between mb-3">
                 <Link
                   href={PATH.knowledgeBaseDetail(kb.id)}
-                  className="text-base font-semibold text-gray-800 hover:text-blue-600 transition-colors line-clamp-1"
+                  className="text-base font-semibold text-ink hover:text-accent transition-colors line-clamp-1"
                 >
                   {kb.name}
                 </Link>
               </div>
 
               {/* 描述 */}
-              <p className="text-sm text-gray-500 mb-3 line-clamp-2 min-h-[2.5rem]">
+              <p className="text-sm text-muted mb-3 line-clamp-2 min-h-[2.5rem]">
                 {kb.description || "暂无描述"}
               </p>
 
               {/* 元信息 */}
-              <div className="flex items-center gap-3 text-xs text-gray-400 mb-4">
+              <div className="flex items-center gap-3 text-xs text-muted mb-4">
                 <span className="inline-flex items-center gap-1">
                   <FileIcon className="w-3.5 h-3.5" />
                   {kb.documents?.length ?? 0} 个文档
@@ -182,16 +182,16 @@ export default function KnowledgeBasePage() {
               </div>
 
               {/* 操作按钮 */}
-              <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
+              <div className="flex items-center gap-2 pt-3 border-t border-border">
                 <Link
                   href={PATH.knowledgeBaseDetail(kb.id)}
-                  className="flex-1 text-center py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                  className="flex-1 text-center py-1.5 text-sm text-accent hover:bg-accent-muted rounded-lg transition-colors"
                 >
                   详情
                 </Link>
                 <Link
                   href={PATH.knowledgeBaseEdit(kb.id)}
-                  className="flex-1 text-center py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="flex-1 text-center py-1.5 text-sm text-muted hover:bg-surface-muted rounded-lg transition-colors"
                 >
                   编辑
                 </Link>

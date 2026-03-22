@@ -88,3 +88,12 @@ export function parseChatRagTopK(input: string): number {
   if (!Number.isFinite(n)) return DEFAULT_RAG_OPTIONS.top_k;
   return Math.min(100, Math.max(1, Math.floor(n)));
 }
+
+/** 重排前候选数：空串表示交给后端默认 max(top_k*4, 16)；否则 1～200 */
+export function parseChatRerankTopN(input: string): number | null {
+  const t = input.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(200, Math.max(1, Math.floor(n)));
+}

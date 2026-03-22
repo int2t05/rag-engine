@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Sequence
 
-from sqlalchemy import delete, func
+from sqlalchemy import delete, func, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.chat import chat_knowledge_bases
@@ -54,7 +54,9 @@ class KnowledgeRepository:
         return (
             self.db.query(KnowledgeBase)
             .options(
-                joinedload(KnowledgeBase.documents).joinedload(Document.processing_tasks)
+                joinedload(KnowledgeBase.documents).joinedload(
+                    Document.processing_tasks
+                )
             )
             .filter(KnowledgeBase.id == kb_id, KnowledgeBase.user_id == user_id)
             .first()
@@ -162,12 +164,30 @@ class KnowledgeRepository:
             or 0
         )
 
+    def count_parent_chunks(self, document_id: int) -> int:
+        """父子分块中父块条数（chunk_metadata.is_parent 为 JSON true）。"""
+        # MySQL JSON：布尔 true 与 CAST('true' AS JSON) 比较
+        q = text(
+            """
+            SELECT COUNT(*) FROM document_chunks
+            WHERE document_id = :did
+            AND chunk_metadata IS NOT NULL
+            AND JSON_EXTRACT(chunk_metadata, '$.is_parent') = CAST('true' AS JSON)
+            """
+        )
+        r = self.db.execute(
+            q, {"did": document_id}
+        ).scalar()  # 返回第一行第一列的值（即数量）
+        return int(r or 0)
+
     def get_uploads_by_ids(self, upload_ids: Sequence[int]) -> List[DocumentUpload]:
         """按主键批量取上传记录（不校验用户；调用方需保证 ID 来源可信）。"""
         if not upload_ids:
             return []
         return (
-            self.db.query(DocumentUpload).filter(DocumentUpload.id.in_(upload_ids)).all()
+            self.db.query(DocumentUpload)
+            .filter(DocumentUpload.id.in_(upload_ids))
+            .all()
         )
 
     def add_processing_tasks(self, tasks: List[ProcessingTask]) -> None:

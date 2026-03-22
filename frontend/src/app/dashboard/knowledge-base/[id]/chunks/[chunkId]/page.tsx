@@ -6,11 +6,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { knowledgeBaseApi, ApiError, type ChunkDetail } from "@/lib/api";
 import { PATH } from "@/lib/routes";
 
 export default function ChunkDetailPage() {
+  const searchParams = useSearchParams();
   const params = useParams();
   const kbIdRaw = params.id;
   const chunkIdRaw = params.chunkId;
@@ -30,6 +31,12 @@ export default function ChunkDetailPage() {
   const [data, setData] = useState<ChunkDetail | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+
+  const chatParam = searchParams.get("chat");
+  const returnChatHref =
+    chatParam && /^\d+$/.test(chatParam)
+      ? `${PATH.chat}?chat=${encodeURIComponent(chatParam)}`
+      : null;
 
   const load = useCallback(async () => {
     if (!Number.isFinite(kbId) || kbId < 1 || !chunkId) {
@@ -61,20 +68,22 @@ export default function ChunkDetailPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
-      {Number.isFinite(kbId) && kbId >= 1 ? (
-        <Link
-          href={PATH.knowledgeBaseDetail(kbId)}
-          className="mb-4 inline-block text-sm text-blue-600 hover:underline"
-        >
-          ← 返回知识库
-        </Link>
+      {returnChatHref ? (
+        <div className="mb-4">
+          <Link
+            href={returnChatHref}
+            className="inline-block text-sm font-medium text-accent hover:underline"
+          >
+            ← 返回对话
+          </Link>
+        </div>
       ) : null}
-      <h1 className="mb-2 text-lg font-semibold text-gray-900">引用片段详情</h1>
-      {loading && <p className="text-sm text-gray-500">加载中…</p>}
+      <h1 className="mb-2 text-lg font-semibold text-ink">引用片段详情</h1>
+      {loading && <p className="text-sm text-muted">加载中…</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
       {!loading && !error && data && (
-        <div className="mt-4 space-y-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="text-xs text-gray-500">
+        <div className="mt-4 space-y-4 rounded-xl border border-border bg-surface p-4 shadow-sm">
+          <div className="text-xs text-muted">
             <div>知识库 ID: {data.kb_id}</div>
             <div className="mt-1 truncate font-mono text-[11px]" title={data.id}>
               分块 ID: {data.id}
@@ -84,21 +93,21 @@ export default function ChunkDetailPage() {
               文件: {data.file_name}
             </div>
             {data.document_file_path && (
-              <div className="mt-1 truncate text-gray-400" title={data.document_file_path}>
+              <div className="mt-1 truncate text-muted" title={data.document_file_path}>
                 存储路径: {data.document_file_path}
               </div>
             )}
           </div>
           <div>
-            <div className="mb-1 text-xs font-medium text-gray-500">片段全文</div>
-            <pre className="max-h-[min(70vh,32rem)] overflow-auto whitespace-pre-wrap rounded-lg bg-gray-50 p-3 text-sm text-gray-800">
+            <div className="mb-1 text-xs font-medium text-muted">片段全文</div>
+            <pre className="max-h-[min(70vh,32rem)] overflow-auto whitespace-pre-wrap rounded-lg bg-surface-muted p-3 text-sm text-ink">
               {pageContent || "（无正文）"}
             </pre>
           </div>
           {data.document_id ? (
             <Link
               href={PATH.documentDetail(data.kb_id, data.document_id)}
-              className="inline-block text-sm text-blue-600 hover:underline"
+              className="inline-block text-sm text-accent hover:underline"
             >
               查看所属文档 →
             </Link>

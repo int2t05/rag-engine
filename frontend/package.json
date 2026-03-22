@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true});\"",
+    "unify-tokens": "node scripts/unify-design-tokens.mjs",
     "dev": "next dev",
+    "dev:clean": "npm run clean && npm run dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

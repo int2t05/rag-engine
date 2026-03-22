@@ -10,18 +10,18 @@
 export function LoadingDots() {
   return (
     <div className="flex justify-start">
-      <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
-        <div className="flex gap-1.5 items-center h-5">
+      <div className="rounded-2xl rounded-bl-md border border-border bg-surface px-4 py-3 shadow-sm">
+        <div className="flex h-5 items-center gap-1.5">
           <span
-            className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+            className="h-2 w-2 animate-bounce rounded-full bg-muted"
             style={{ animationDelay: "0ms" }}
           />
           <span
-            className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+            className="h-2 w-2 animate-bounce rounded-full bg-muted"
             style={{ animationDelay: "150ms" }}
           />
           <span
-            className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+            className="h-2 w-2 animate-bounce rounded-full bg-muted"
             style={{ animationDelay: "300ms" }}
           />
         </div>

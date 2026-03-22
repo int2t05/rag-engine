@@ -1,6 +1,6 @@
 /**
  * @fileoverview 评估任务状态标签（与后端 task.status 一致）
- * @description 使用琥珀/天青/翠/玫语义色，避免通用 gray-100 + blue 组合
+ * @description 使用琥珀/天青/翠/玫语义色，与 Dashboard 状态扫读一致
  */
 
 const LABELS: Record<string, string> = {

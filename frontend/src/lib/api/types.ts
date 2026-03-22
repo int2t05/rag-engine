@@ -30,6 +30,12 @@ export interface DocumentItem {
   updated_at: string;
   processing_tasks: ProcessingTask[];
   chunk_count?: number | null;
+  /** 知识库启用父子分块时：父块条数（仅库表、不入向量） */
+  parent_chunk_count?: number | null;
+  /** 知识库启用父子分块时：子块条数（可检索） */
+  child_chunk_count?: number | null;
+  /** 所属知识库是否启用父子分块入库 */
+  parent_child_chunking?: boolean;
 }
 
 /** 尚未关联 Document 的上传队列任务（知识库详情接口可能返回） */
@@ -92,7 +98,10 @@ export interface PreviewChunk {
 
 export interface PreviewResult {
   chunks: PreviewChunk[];
+  /** 父块 + 子块（与 document_chunks 一致；预览列表仅为子块） */
   total_chunks: number;
+  parent_chunk_count?: number;
+  child_chunk_count?: number;
 }
 
 export interface RetrievalResult {

@@ -242,7 +242,7 @@ export default function KnowledgeBaseDetailPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="animate-pulse text-gray-400">加载中...</div>
+        <div className="animate-pulse text-muted">加载中...</div>
       </div>
     );
   }
@@ -252,7 +252,7 @@ export default function KnowledgeBaseDetailPage() {
       <div className="max-w-3xl mx-auto">
         <Link
           href={PATH.knowledgeBase}
-          className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1 mb-4"
+          className="text-sm text-muted hover:text-ink transition-colors inline-flex items-center gap-1 mb-4"
         >
           <ArrowLeftIcon className="w-4 h-4" />
           返回列表
@@ -272,17 +272,17 @@ export default function KnowledgeBaseDetailPage() {
     <div className="max-w-4xl mx-auto space-y-6">
       <Link
         href={PATH.knowledgeBase}
-        className="text-sm text-gray-500 hover:text-gray-700 transition-colors inline-flex items-center gap-1"
+        className="text-sm text-muted hover:text-ink transition-colors inline-flex items-center gap-1"
       >
         <ArrowLeftIcon className="w-4 h-4" />
         返回列表
       </Link>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="bg-surface rounded-xl border border-border p-6">
         <div className="flex items-start justify-between mb-4 gap-4">
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-gray-800 truncate">{kb.name}</h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <h1 className="text-2xl font-bold text-ink truncate">{kb.name}</h1>
+            <p className="text-sm text-muted mt-1">
               {kb.description || "暂无描述"}
             </p>
             {kb.parent_child_chunking ? (
@@ -293,39 +293,39 @@ export default function KnowledgeBaseDetailPage() {
           </div>
           <Link
             href={PATH.knowledgeBaseEdit(kb.id)}
-            className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 border border-blue-200 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"
+            className="inline-flex items-center gap-1.5 text-sm text-accent hover:text-accent-hover border border-accent/30 hover:bg-accent-muted px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"
           >
             <EditIcon className="w-4 h-4" />
             编辑
           </Link>
         </div>
-        <div className="grid grid-cols-3 gap-4 text-sm border-t border-gray-100 pt-4">
+        <div className="grid grid-cols-3 gap-4 text-sm border-t border-border pt-4">
           <div>
-            <span className="text-gray-500">文档数</span>
-            <p className="text-gray-800 mt-0.5 font-medium">{kb.documents.length}</p>
+            <span className="text-muted">文档数</span>
+            <p className="text-ink mt-0.5 font-medium">{kb.documents.length}</p>
           </div>
           <div>
-            <span className="text-gray-500">创建时间</span>
-            <p className="text-gray-800 mt-0.5">
+            <span className="text-muted">创建时间</span>
+            <p className="text-ink mt-0.5">
               {new Date(kb.created_at).toLocaleString("zh-CN")}
             </p>
           </div>
           <div>
-            <span className="text-gray-500">更新时间</span>
-            <p className="text-gray-800 mt-0.5">
+            <span className="text-muted">更新时间</span>
+            <p className="text-ink mt-0.5">
               {new Date(kb.updated_at).toLocaleString("zh-CN")}
             </p>
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="bg-surface rounded-xl border border-border p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-800">上传文档</h2>
+          <h2 className="text-lg font-semibold text-ink">上传文档</h2>
           <button
             onClick={handleCleanup}
             disabled={cleaning}
-            className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 hover:bg-gray-50 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-ink border border-border hover:bg-surface-muted px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
             title="清理过期的临时上传文件（超过 24 小时）"
           >
             <TrashIcon className="w-3.5 h-3.5" />
@@ -343,24 +343,24 @@ export default function KnowledgeBaseDetailPage() {
           onClick={() => fileInputRef.current?.click()}
           className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
             dragOver
-              ? "border-blue-400 bg-blue-50"
-              : "border-gray-300 hover:border-gray-400 hover:bg-gray-50"
+              ? "border-accent bg-accent-muted"
+              : "border-border hover:border-ink/25 hover:bg-surface-muted"
           }`}
         >
-          <UploadIcon className="w-10 h-10 text-gray-400 mx-auto mb-3" />
+          <UploadIcon className="w-10 h-10 text-muted mx-auto mb-3" />
           {uploading ? (
-            <p className="text-sm text-blue-600 font-medium">上传中...</p>
+            <p className="text-sm text-accent font-medium">上传中...</p>
           ) : (
             <>
-              <p className="text-sm text-gray-600 font-medium">
+              <p className="text-sm text-muted font-medium">
                 拖拽文件到此处，或点击选择文件
               </p>
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-muted mt-1">
                 支持 PDF、TXT、Markdown、DOCX 等格式
               </p>
-              <p className="text-xs text-gray-500 mt-3 max-w-lg mx-auto leading-relaxed">
+              <p className="text-xs text-muted mt-3 max-w-lg mx-auto leading-relaxed">
                 去重规则：仅当与当前知识库中已有文档{" "}
-                <span className="text-gray-700 font-medium">文件名相同且内容完全一致</span>
+                <span className="text-ink font-medium">文件名相同且内容完全一致</span>
                 时才会跳过上传；若仅同名但内容有变化，将覆盖原文档并增量更新向量。
               </p>
             </>
@@ -377,19 +377,19 @@ export default function KnowledgeBaseDetailPage() {
 
         {uploadResults.length > 0 && (
           <div className="mt-4 space-y-2">
-            <h3 className="text-sm font-medium text-gray-700">上传结果</h3>
+            <h3 className="text-sm font-medium text-ink">上传结果</h3>
             {uploadResults.map((r, i) => (
               <div
                 key={r.upload_id ?? r.document_id ?? `upload-${i}`}
-                className="flex items-start justify-between gap-3 px-3 py-2.5 bg-gray-50 rounded-lg text-sm"
+                className="flex items-start justify-between gap-3 px-3 py-2.5 bg-surface-muted rounded-lg text-sm"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <FileIcon className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
-                    <span className="text-gray-800 font-medium truncate">{r.file_name}</span>
+                    <FileIcon className="w-4 h-4 text-muted flex-shrink-0 mt-0.5" />
+                    <span className="text-ink font-medium truncate">{r.file_name}</span>
                   </div>
                   {r.status === "exists" && (
-                    <p className="text-xs text-gray-500 mt-1 pl-6 leading-relaxed">
+                    <p className="text-xs text-muted mt-1 pl-6 leading-relaxed">
                       与库内已有文档相比，文件名与内容均完全一致，故跳过重复上传与处理。
                     </p>
                   )}
@@ -399,7 +399,7 @@ export default function KnowledgeBaseDetailPage() {
                     </p>
                   )}
                   {r.status === "pending" && (
-                    <p className="text-xs text-gray-500 mt-1 pl-6 leading-relaxed">
+                    <p className="text-xs text-muted mt-1 pl-6 leading-relaxed">
                       新文件，提交处理后将写入知识库。
                     </p>
                   )}
@@ -412,19 +412,19 @@ export default function KnowledgeBaseDetailPage() {
 
             {pendingUploads.length > 0 && (
               <>
-                <div className="mt-3 p-3 bg-gray-50 rounded-xl space-y-3">
+                <div className="mt-3 p-3 bg-surface-muted rounded-xl space-y-3">
                   <div>
-                    <h4 className="text-xs font-medium text-gray-600 tracking-wide">
+                    <h4 className="text-xs font-medium text-muted tracking-wide">
                       分块参数（仅影响预览）
                     </h4>
-                    <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                    <p className="text-[11px] text-muted mt-1 leading-relaxed">
                       不填则采用系统默认：块大小 {DEFAULT_CHUNK_SIZE} 字符、重叠{" "}
                       {DEFAULT_CHUNK_OVERLAP} 字符（与向量化处理默认一致）。实际入库处理由服务端配置决定。
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-gray-600 mb-1">
+                      <label className="block text-xs text-muted mb-1">
                         每块最大字符数
                       </label>
                       <input
@@ -435,11 +435,11 @@ export default function KnowledgeBaseDetailPage() {
                           setChunkSizeInput(e.target.value.replace(/\D/g, ""))
                         }
                         placeholder={`默认 ${DEFAULT_CHUNK_SIZE}`}
-                        className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="w-full border border-border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-600 mb-1">
+                      <label className="block text-xs text-muted mb-1">
                         块之间重叠字符数
                       </label>
                       <input
@@ -450,7 +450,7 @@ export default function KnowledgeBaseDetailPage() {
                           setChunkOverlapInput(e.target.value.replace(/\D/g, ""))
                         }
                         placeholder={`默认 ${DEFAULT_CHUNK_OVERLAP}`}
-                        className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="w-full border border-border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
                       />
                     </div>
                   </div>
@@ -460,14 +460,14 @@ export default function KnowledgeBaseDetailPage() {
                   <button
                     onClick={handlePreview}
                     disabled={previewing || isPolling}
-                    className="flex-1 bg-white text-blue-600 border border-blue-300 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 bg-surface text-accent border border-accent/40 py-2.5 rounded-lg text-sm font-medium hover:bg-accent-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {previewing ? "预览中..." : "预览分块"}
                   </button>
                   <button
                     onClick={handleProcess}
                     disabled={processing || isPolling}
-                    className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    className="flex-1 bg-accent text-surface py-2.5 rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors disabled:cursor-not-allowed disabled:bg-border"
                   >
                     {processing
                       ? "提交处理中..."
@@ -484,10 +484,10 @@ export default function KnowledgeBaseDetailPage() {
                 {showPreview && Object.keys(previewData).length > 0 && (
                   <div className="mt-3 space-y-3">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-medium text-gray-700">分块预览</h4>
+                      <h4 className="text-sm font-medium text-ink">分块预览</h4>
                       <button
                         onClick={() => setShowPreview(false)}
-                        className="text-xs text-gray-400 hover:text-gray-600"
+                        className="text-xs text-muted hover:text-muted"
                       >
                         收起
                       </button>
@@ -503,41 +503,48 @@ export default function KnowledgeBaseDetailPage() {
                       return (
                         <div
                           key={docId}
-                          className="border border-gray-200 rounded-xl overflow-hidden"
+                          className="border border-border rounded-xl overflow-hidden"
                         >
-                          <div className="px-3 py-2 bg-gray-50 flex items-center justify-between">
-                            <span className="text-sm font-medium text-gray-700">
+                          <div className="px-3 py-2 bg-surface-muted flex items-center justify-between">
+                            <span className="text-sm font-medium text-ink">
                               {fileName}
                             </span>
-                            <span className="text-xs text-gray-500">
-                              共 {preview.total_chunks} 个分块
+                            <span className="text-xs text-muted text-right max-w-[min(100%,20rem)]">
+                              {kb.parent_child_chunking
+                                ? `共 ${preview.total_chunks} 个分块（父 ${preview.parent_chunk_count ?? 0} + 子 ${preview.child_chunk_count ?? 0}）`
+                                : `共 ${preview.total_chunks} 个分块`}
                             </span>
                           </div>
-                          <div className="max-h-96 overflow-y-auto divide-y divide-gray-100 scrollbar-thin">
+                          {kb.parent_child_chunking && (
+                            <p className="px-3 py-1.5 text-xs text-muted bg-surface-muted/80 border-b border-border">
+                              下方列表为子块预览；父块会写入 document_chunks 但不入向量库。
+                            </p>
+                          )}
+                          <div className="max-h-96 overflow-y-auto divide-y divide-border scrollbar-thin">
                             {preview.chunks.map((chunk, idx) => {
                               const chunkKey = `${docId}-${idx}`;
                               const isExpanded = expandedChunks.has(chunkKey);
                               return (
                                 <div
                                   key={chunkKey}
-                                  className="px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors"
+                                  className="px-3 py-2 cursor-pointer hover:bg-surface-muted transition-colors"
                                   onClick={() => toggleChunkExpand(chunkKey)}
                                 >
                                   <div className="flex items-center justify-between mb-1">
-                                    <span className="text-xs font-mono text-gray-400">
+                                    <span className="text-xs font-mono text-muted">
                                       #{idx + 1}
                                     </span>
                                     <div className="flex items-center gap-2">
-                                      <span className="text-xs text-gray-400">
+                                      <span className="text-xs text-muted">
                                         {chunk.content.length} 字符
                                       </span>
-                                      <span className="text-xs text-blue-500">
+                                      <span className="text-xs text-accent">
                                         {isExpanded ? "收起" : "展开"}
                                       </span>
                                     </div>
                                   </div>
                                   <p
-                                    className={`text-xs text-gray-600 whitespace-pre-wrap ${
+                                    className={`text-xs text-muted whitespace-pre-wrap ${
                                       isExpanded ? "" : "line-clamp-3"
                                     }`}
                                   >
@@ -558,9 +565,9 @@ export default function KnowledgeBaseDetailPage() {
         )}
 
         {isPolling && (
-          <div className="mt-4 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2.5 text-sm text-blue-800">
+          <div className="mt-4 flex items-center gap-2 rounded-lg border border-accent/30 bg-accent-muted/80 px-3 py-2.5 text-sm text-accent">
             <div
-              className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0"
+              className="h-4 w-4 flex-shrink-0 animate-spin rounded-full border-2 border-accent border-t-transparent"
               aria-hidden
             />
             <span>
@@ -570,11 +577,11 @@ export default function KnowledgeBaseDetailPage() {
         )}
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="bg-surface rounded-xl border border-border p-6">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
-          <h2 className="text-lg font-semibold text-gray-800">
+          <h2 className="text-lg font-semibold text-ink">
             文档列表
-            <span className="text-sm font-normal text-gray-500 ml-2">
+            <span className="text-sm font-normal text-muted ml-2">
               ({kb.documents.length} 个文档)
             </span>
           </h2>
@@ -585,7 +592,7 @@ export default function KnowledgeBaseDetailPage() {
                 onClick={() =>
                   setSelectedDocIds(kb.documents.map((d) => d.id))
                 }
-                className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+                className="text-xs text-muted hover:text-ink px-2 py-1 rounded border border-border hover:bg-surface-muted"
               >
                 全选
               </button>
@@ -593,7 +600,7 @@ export default function KnowledgeBaseDetailPage() {
                 type="button"
                 onClick={() => setSelectedDocIds([])}
                 disabled={selectedDocIds.length === 0}
-                className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
+                className="text-xs text-muted hover:text-ink px-2 py-1 rounded border border-border hover:bg-surface-muted disabled:opacity-40"
               >
                 取消选择
               </button>
@@ -611,20 +618,20 @@ export default function KnowledgeBaseDetailPage() {
 
         {kb.documents.length === 0 &&
         !(kb.pending_upload_tasks && kb.pending_upload_tasks.length > 0) ? (
-          <div className="text-center py-8 text-gray-400 text-sm">
+          <div className="text-center py-8 text-muted text-sm">
             暂无文档，请先上传文件
           </div>
         ) : (
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-border">
             {(kb.pending_upload_tasks ?? []).map((t) => (
               <div
                 key={`pending-${t.task_id}`}
                 className="py-3 flex items-center justify-between gap-4 -mx-2 px-2 rounded-lg bg-amber-50/50 border border-amber-100/80"
               >
                 <div className="flex-1 flex items-center gap-3 min-w-0">
-                  <FileIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                  <FileIcon className="w-5 h-5 text-muted flex-shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-800 truncate">
+                    <p className="text-sm font-medium text-ink truncate">
                       {t.file_name}
                     </p>
                     <p className="text-xs text-amber-700/90">
@@ -643,12 +650,12 @@ export default function KnowledgeBaseDetailPage() {
               const busy = isDocumentProcessing(doc);
               const rowMain = (
                 <>
-                  <FileIcon className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                  <FileIcon className="w-5 h-5 text-muted flex-shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-800 truncate">
+                    <p className="text-sm font-medium text-ink truncate">
                       {doc.file_name}
                     </p>
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-muted">
                       {formatFileSize(doc.file_size)} &middot;{" "}
                       {new Date(doc.created_at).toLocaleString("zh-CN")}
                     </p>
@@ -661,12 +668,12 @@ export default function KnowledgeBaseDetailPage() {
                   className={`py-3 flex items-center justify-between gap-4 -mx-2 px-2 rounded-lg transition-colors ${
                     busy
                       ? "bg-amber-50/50 border border-amber-100/80"
-                      : "hover:bg-gray-50 group"
+                      : "hover:bg-surface-muted group"
                   }`}
                 >
                   <input
                     type="checkbox"
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0"
+                    className="rounded border-border text-accent focus:ring-accent flex-shrink-0"
                     checked={selectedDocIds.includes(doc.id)}
                     onChange={() =>
                       setSelectedDocIds((prev) =>
@@ -694,7 +701,7 @@ export default function KnowledgeBaseDetailPage() {
                   )}
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {displayTask && <StatusBadge status={displayTask.status} />}
-                    <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded hidden sm:inline-block">
+                    <span className="text-xs px-2 py-0.5 bg-surface-muted text-muted rounded hidden sm:inline-block">
                       {doc.content_type}
                     </span>
                     <button
@@ -704,7 +711,7 @@ export default function KnowledgeBaseDetailPage() {
                         setConfirmDeleteDoc(doc);
                       }}
                       disabled={deletingDoc === doc.id}
-                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                      className="p-1.5 text-muted hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
                       title="删除文档"
                     >
                       <TrashIcon className="w-4 h-4" />
@@ -720,7 +727,7 @@ export default function KnowledgeBaseDetailPage() {
                     ) : (
                       <Link
                         href={PATH.documentDetail(kb.id, doc.id)}
-                        className="p-1 text-gray-300 hover:text-gray-500"
+                        className="p-1 text-muted hover:text-muted"
                       >
                         <ChevronRightIcon className="w-4 h-4" />
                       </Link>
@@ -734,8 +741,8 @@ export default function KnowledgeBaseDetailPage() {
       </div>
 
       {kb.documents.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">
+        <div className="bg-surface rounded-xl border border-border p-6">
+          <h2 className="text-lg font-semibold text-ink mb-4">
             检索测试
           </h2>
           <div className="flex flex-col sm:flex-row gap-3">
@@ -745,10 +752,10 @@ export default function KnowledgeBaseDetailPage() {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleRetrieval()}
               placeholder="输入要向量检索的问题或关键词…"
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="flex-1 border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
             />
             <div className="flex flex-col gap-1">
-              <label className="text-[11px] text-gray-500 whitespace-nowrap">
+              <label className="text-[11px] text-muted whitespace-nowrap">
                 返回条数
               </label>
               <div className="flex gap-2">
@@ -761,19 +768,19 @@ export default function KnowledgeBaseDetailPage() {
                 }
                 placeholder={`默认 ${DEFAULT_TOP_K}`}
                 title={`留空则使用 ${DEFAULT_TOP_K} 条`}
-                className="w-[5.5rem] border border-gray-300 rounded-lg px-2 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-[5.5rem] border border-border rounded-lg px-2 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
               />
               <button
                 onClick={handleRetrieval}
                 disabled={retrieving || !query.trim()}
-                className="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex-shrink-0"
+                className="bg-accent text-surface px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors disabled:cursor-not-allowed disabled:bg-border flex-shrink-0"
               >
                 {retrieving ? "检索中..." : "检索"}
               </button>
               </div>
             </div>
           </div>
-          <p className="text-[11px] text-gray-500 mt-2">
+          <p className="text-[11px] text-muted mt-2">
             返回条数留空则取前 {DEFAULT_TOP_K} 条最相关片段（与评估/对话检索默认习惯一致，可填 1–50）。
           </p>
 
@@ -788,26 +795,26 @@ export default function KnowledgeBaseDetailPage() {
               {retrievalResults.map((r, i) => (
                 <div
                   key={`retrieval-${i}-${r.score}`}
-                  className="border border-gray-200 rounded-xl p-4"
+                  className="border border-border rounded-xl p-4"
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-gray-500">
+                    <span className="text-xs font-medium text-muted">
                       #{i + 1}
                     </span>
-                    <span className="text-xs text-blue-600 font-mono">
+                    <span className="text-xs text-accent font-mono">
                       score: {r.score.toFixed(4)}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                  <p className="text-sm text-ink whitespace-pre-wrap leading-relaxed">
                     {r.content}
                   </p>
                   {r.metadata && Object.keys(r.metadata).length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-gray-100">
+                    <div className="mt-2 pt-2 border-t border-border">
                       <div className="flex flex-wrap gap-2">
                         {Object.entries(r.metadata).map(([k, v]) => (
                           <span
                             key={k}
-                            className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded"
+                            className="text-xs bg-surface-muted text-muted px-2 py-0.5 rounded"
                           >
                             {k}: {String(v)}
                           </span>

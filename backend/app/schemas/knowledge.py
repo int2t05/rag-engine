@@ -108,7 +108,10 @@ class DocumentResponse(DocumentBase):
     created_at: datetime
     updated_at: datetime
     processing_tasks: List[ProcessingTask] = []
-    chunk_count: Optional[int] = None  # 分块个数
+    chunk_count: Optional[int] = None  # 分块总条数（document_chunks，含父子分块时的父块）
+    parent_chunk_count: Optional[int] = None  # 父子分块中父块条数（metadata.is_parent）
+    child_chunk_count: Optional[int] = None  # 子块条数（总条数 − 父块条数）
+    parent_child_chunking: bool = False  # 所属知识库是否启用父子分块入库（供前端展示拆分）
 
     class Config:
         from_attributes = True

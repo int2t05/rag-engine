@@ -64,19 +64,21 @@ export default function ChatPage() {
     setRagPanelOpen,
     topKInput,
     setTopKInput,
+    rerankTopNInput,
+    setRerankTopNInput,
   } = useChatSession();
 
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="animate-pulse text-gray-400">加载中...</div>
+        <div className="animate-pulse text-sm text-muted">加载中...</div>
       </div>
     );
   }
 
   return (
     <div className="flex h-full min-h-[calc(100vh-3.5rem)]">
-      <div className="hidden w-64 flex-shrink-0 flex-col border-r border-gray-200 bg-white md:flex">
+      <div className="hidden w-64 flex-shrink-0 flex-col border-r border-border bg-surface md:flex">
         <ChatList
           chats={chats}
           currentChat={currentChat}
@@ -97,13 +99,13 @@ export default function ChatPage() {
             onClick={() => setMobileSidebarOpen(false)}
             aria-hidden
           />
-          <div className="animate-slide-in-left fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-gray-200 p-3">
-              <span className="text-sm font-semibold text-gray-700">对话列表</span>
+          <div className="animate-slide-in-left fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-surface shadow-xl">
+            <div className="flex items-center justify-between border-b border-border p-3">
+              <span className="text-sm font-semibold text-ink">对话列表</span>
               <button
                 type="button"
                 onClick={() => setMobileSidebarOpen(false)}
-                className="p-1 text-gray-400 hover:text-gray-600"
+                className="p-1 text-muted hover:text-ink"
               >
                 <XIcon className="h-4 w-4" />
               </button>
@@ -123,14 +125,14 @@ export default function ChatPage() {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col bg-gray-50">
+      <div className="flex min-w-0 flex-1 flex-col bg-surface-muted">
         {currentChat ? (
           <>
-            <div className="flex h-12 flex-shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-4">
+            <div className="flex h-12 flex-shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
               <button
                 type="button"
                 onClick={() => setMobileSidebarOpen(true)}
-                className="p-1 text-gray-500 hover:text-gray-700 md:hidden"
+                className="p-1 text-muted hover:text-ink md:hidden"
               >
                 <svg
                   className="h-5 w-5"
@@ -146,24 +148,25 @@ export default function ChatPage() {
                   />
                 </svg>
               </button>
-              <h2 className="truncate text-sm font-semibold text-gray-800">{currentChat.title}</h2>
+              <h2 className="truncate text-sm font-semibold text-ink">{currentChat.title}</h2>
             </div>
 
             <div className="scrollbar-thin flex-1 space-y-4 overflow-y-auto p-4 md:p-6">
               {messages.length === 0 && (
-                <div className="py-12 text-center text-sm text-gray-400">开始发送消息进行问答</div>
+                <div className="py-12 text-center text-sm text-muted">开始发送消息进行问答</div>
               )}
               {messages.map((msg, idx) => (
                 <MessageBubble
                   key={msg.id ?? msg._clientId ?? `msg-${idx}`}
                   message={msg}
+                  chatId={currentChat.id}
                 />
               ))}
               {sending && !streaming && <LoadingDots />}
               <div ref={messagesEndRef} />
             </div>
 
-            <div className="border-t border-gray-200 bg-white p-3 md:p-4">
+            <div className="border-t border-border bg-surface p-3 md:p-4">
               <RagOptionsBar
                 open={ragPanelOpen}
                 onToggle={() => setRagPanelOpen((o) => !o)}
@@ -171,6 +174,8 @@ export default function ChatPage() {
                 onChange={setRagOptions}
                 topKInput={topKInput}
                 onTopKInputChange={setTopKInput}
+                rerankTopNInput={rerankTopNInput}
+                onRerankTopNInputChange={setRerankTopNInput}
                 disabled={sending || streaming}
               />
               <div className="mx-auto flex max-w-3xl items-end gap-2 md:gap-3">
@@ -180,7 +185,7 @@ export default function ChatPage() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"
-                  className="flex-1 resize-none rounded-xl border border-gray-300 px-4 py-3 text-sm transition-shadow focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 resize-none rounded-xl border border-border bg-surface px-4 py-3 text-sm text-ink transition-shadow placeholder:text-muted focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent/35"
                   rows={1}
                   onInput={(e) => {
                     const el = e.currentTarget;
@@ -201,7 +206,7 @@ export default function ChatPage() {
                   type="button"
                   onClick={handleSendMessage}
                   disabled={!input.trim() || sending}
-                  className="flex-shrink-0 rounded-xl bg-blue-600 p-3 text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex-shrink-0 rounded-xl bg-accent p-3 text-surface transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <svg
                     className="h-4 w-4"
@@ -223,23 +228,23 @@ export default function ChatPage() {
         ) : (
           <div className="flex flex-1 items-center justify-center p-6">
             <div className="max-w-xs text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100">
-                <ChatIcon className="h-8 w-8 text-gray-400" />
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-surface-muted">
+                <ChatIcon className="h-8 w-8 text-muted" />
               </div>
-              <h3 className="mb-2 text-lg font-semibold text-gray-800">选择或创建对话</h3>
-              <p className="mb-6 text-sm text-gray-500">从左侧选择已有对话，或创建新对话开始问答</p>
+              <h3 className="mb-2 text-lg font-semibold text-ink">选择或创建对话</h3>
+              <p className="mb-6 text-sm text-muted">从左侧选择已有对话，或创建新对话开始问答</p>
               <div className="flex flex-col justify-center gap-3 sm:flex-row">
                 <button
                   type="button"
                   onClick={() => setMobileSidebarOpen(true)}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 md:hidden"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-surface-muted px-4 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-border/40 md:hidden"
                 >
                   查看对话列表
                 </button>
                 <button
                   type="button"
                   onClick={handleNewChat}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-surface transition-colors hover:bg-accent-hover"
                 >
                   新建对话
                 </button>

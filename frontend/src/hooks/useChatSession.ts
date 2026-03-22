@@ -20,9 +20,16 @@ import {
 } from "@/lib/api";
 import { parseFastApiErrorBody } from "@/lib/api-errors";
 import {
+  defaultStoredChatRag,
+  loadChatRag,
+  removeChatRag,
+  saveChatRag,
+} from "@/lib/chat-rag-storage";
+import {
   DEFAULT_CHAT_TITLE_PREFIX,
   DEFAULT_RAG_OPTIONS,
   parseChatRagTopK,
+  parseChatRerankTopN,
 } from "@/lib/form-defaults";
 import { parseCitationsFromContent, sseDataPayload } from "@/lib/chat-stream";
 import { citationsFromRagContextBase64 } from "@/lib/rag-context";
@@ -76,6 +83,7 @@ export function useChatSession() {
   }));
   const [ragPanelOpen, setRagPanelOpen] = useState(false);
   const [topKInput, setTopKInput] = useState(() => String(DEFAULT_RAG_OPTIONS.top_k));
+  const [rerankTopNInput, setRerankTopNInput] = useState("");
 
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -128,6 +136,13 @@ export function useChatSession() {
     setSelectedChatIds((prev) => prev.filter((id) => valid.has(id)));
   }, [chats]);
 
+  /** 当前对话的 RAG 面板选项写入本地，按会话恢复 */
+  useEffect(() => {
+    const id = currentChat?.id;
+    if (id == null) return;
+    saveChatRag(id, { ragOptions, topKInput, rerankTopNInput });
+  }, [currentChat?.id, ragOptions, topKInput, rerankTopNInput]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -176,6 +191,17 @@ export function useChatSession() {
         const fullChat = await chatApi.get(chat.id);
         setCurrentChat(fullChat);
         setMessages(parseChatMessagesFromApi(fullChat));
+        const stored = loadChatRag(chat.id);
+        if (stored) {
+          setRagOptions(stored.ragOptions);
+          setTopKInput(stored.topKInput);
+          setRerankTopNInput(stored.rerankTopNInput);
+        } else {
+          const d = defaultStoredChatRag();
+          setRagOptions(d.ragOptions);
+          setTopKInput(d.topKInput);
+          setRerankTopNInput(d.rerankTopNInput);
+        }
         setMobileSidebarOpen(false);
       } catch (err) {
         showToast(err instanceof ApiError ? err.message : "获取对话详情失败");
@@ -233,6 +259,10 @@ export function useChatSession() {
       setCurrentChat(chat);
       syncChatToUrl(chat.id);
       setMessages([]);
+      const fresh = defaultStoredChatRag();
+      setRagOptions(fresh.ragOptions);
+      setTopKInput(fresh.topKInput);
+      setRerankTopNInput(fresh.rerankTopNInput);
       setShowNewChat(false);
       setNewChatTitle("");
       setSelectedKbs([]);
@@ -255,6 +285,7 @@ export function useChatSession() {
     const chat = confirmDelete;
     try {
       await chatApi.delete(chat.id);
+      removeChatRag(chat.id);
       setChats((prev) => prev.filter((c) => c.id !== chat.id));
       if (currentChat?.id === chat.id) {
         setCurrentChat(null);
@@ -285,6 +316,9 @@ export function useChatSession() {
     try {
       const res = await chatApi.batchDelete(selectedChatIds);
       const removed = new Set(res.deleted);
+      for (const id of res.deleted) {
+        removeChatRag(id);
+      }
       setChats((prev) => prev.filter((c) => !removed.has(c.id)));
       if (currentChat && removed.has(currentChat.id)) {
         setCurrentChat(null);
@@ -339,6 +373,7 @@ export function useChatSession() {
       const ragPayload: RagPipelineOptions = {
         ...ragOptions,
         top_k: parseChatRagTopK(topKInput),
+        rerank_top_n: ragOptions.rerank ? parseChatRerankTopN(rerankTopNInput) : null,
       };
       const response = await chatApi.sendMessage(
         currentChat.id,
@@ -463,7 +498,16 @@ export function useChatSession() {
       setStreaming(false);
       inputRef.current?.focus();
     }
-  }, [input, currentChat, sending, messages, showToast, ragOptions, topKInput]);
+  }, [
+    input,
+    currentChat,
+    sending,
+    messages,
+    showToast,
+    ragOptions,
+    topKInput,
+    rerankTopNInput,
+  ]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -534,5 +578,7 @@ export function useChatSession() {
     setRagPanelOpen,
     topKInput,
     setTopKInput,
+    rerankTopNInput,
+    setRerankTopNInput,
   };
 }

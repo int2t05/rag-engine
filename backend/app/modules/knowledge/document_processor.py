@@ -71,7 +71,10 @@ class PreviewResult(BaseModel):
     """分块预览结果"""
 
     chunks: List[TextChunk]
+    #: 总块数 = 父块数 + 子块数（父子分块时父块也在 document_chunks，仅子块入向量库）
     total_chunks: int
+    parent_chunk_count: int = 0
+    child_chunk_count: int = 0
     #: 父子分块时父块规格（增量入库用）；不参与 API 序列化
     parent_rows_spec: List[Dict[str, Any]] = Field(default_factory=list, exclude=True)
 
@@ -380,10 +383,13 @@ async def preview_document(
             TextChunk(content=c.page_content, metadata=dict(c.metadata or {}))
             for c in chunks_lc
         ]
-
+        parent_n = len(parent_spec) if eff_pc else 0
+        child_n = len(preview_chunks)
         return PreviewResult(
             chunks=preview_chunks,
-            total_chunks=len(preview_chunks),
+            total_chunks=parent_n + child_n,
+            parent_chunk_count=parent_n,
+            child_chunk_count=child_n,
             parent_rows_spec=parent_spec,
         )
     finally:
