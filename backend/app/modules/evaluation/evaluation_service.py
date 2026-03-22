@@ -12,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from datetime import datetime
@@ -35,7 +37,10 @@ from app.shared.llm.llm_factory import LLMFactory
 from app.shared.vector_store import VectorStoreFactory
 from app.shared.rag_dedupe import dedupe_retrieved_documents
 from app.shared.ai_runtime_loader import AiRuntimeNotConfigured
+from app.schemas.ai_runtime import AiRuntimeSettings
+from app.shared.ai_runtime_context import get_ai_runtime
 from app.shared.ai_runtime_scope import ai_runtime_scope
+from app.modules.evaluation.judge_runtime import merge_ai_runtime_for_judge
 
 # RAGAS collections + 本模块严格指标
 _RAGAS_AVAILABLE = False
@@ -50,6 +55,15 @@ except ImportError as e:
 def _empty_score_row() -> dict:
     """无 RAGAS 或异常时的占位结构（与 evaluate_metrics_sample 键一致，不含 skipped）。"""
     return {k: None for k in SCORE_KEYS}
+
+
+def _evaluation_task_still_present(db: Session, task_id: int) -> bool:
+    """
+    任务行是否仍存在（强制删除会级联删掉任务，后台线程需据此停止）。
+    使用标量 SELECT，避免会话 identity map 返回已删行残留实例。
+    """
+    pk = db.scalar(select(EvaluationTask.id).where(EvaluationTask.id == task_id))
+    return pk is not None
 
 
 def _call_sync_with_timeout(fn: Any, timeout_sec: float, label: str) -> Any:
@@ -121,6 +135,7 @@ def _evaluate_with_ragas(
     answer: str,
     ground_truth: str,
     metrics_to_use: List[str],
+    judge_runtime: Optional[AiRuntimeSettings] = None,
 ) -> dict:
     """单条样本：RAGAS collections ascore（Strict 提示 + 重试）。"""
     from app.modules.evaluation.ragas_eval import (
@@ -145,7 +160,7 @@ def _evaluate_with_ragas(
 
     async def _run() -> dict:
         need_emb = metrics_need_embeddings(metrics_to_use)
-        llm, emb = build_ragas_dependencies(need_emb)
+        llm, emb = build_ragas_dependencies(need_emb, ai_override=judge_runtime)
         inst = build_metric_instances(llm, emb, metrics_to_use)
         return await asyncio.wait_for(
             evaluate_metrics_sample(
@@ -192,9 +207,6 @@ def run_evaluation_task(task_id: int) -> None:
         if not task:
             return
 
-        if task.status == "running":
-            return
-
         test_cases = (
             db.query(EvaluationTestCase)
             .filter(EvaluationTestCase.task_id == task_id)
@@ -231,6 +243,10 @@ def run_evaluation_task(task_id: int) -> None:
             with ai_runtime_scope(db, uid):
                 _run_evaluation_body(db, task_id, task, test_cases)
         except AiRuntimeNotConfigured as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
             task = db.query(EvaluationTask).filter(EvaluationTask.id == task_id).first()
             if task:
                 task.status = "failed"  # type: ignore
@@ -238,12 +254,31 @@ def run_evaluation_task(task_id: int) -> None:
                 db.commit()
             return
 
+    except IntegrityError:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        if not _evaluation_task_still_present(db, task_id):
+            logging.info(
+                "评估任务 id=%s 已删除，外键约束失败已忽略，后台任务结束",
+                task_id,
+            )
+            return
+        raise
     except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
         task = db.query(EvaluationTask).filter(EvaluationTask.id == task_id).first()
         if task:
-            task.status = "failed"  # type: ignore
-            task.error_message = str(e)  # type: ignore
-            db.commit()
+            try:
+                task.status = "failed"  # type: ignore
+                task.error_message = str(e)  # type: ignore
+                db.commit()
+            except Exception:
+                db.rollback()
         raise
     finally:
         db.close()
@@ -258,6 +293,10 @@ def _run_evaluation_body(
     """
     运行评估任务
     """
+    if not _evaluation_task_still_present(db, task_id):
+        logging.info("评估任务 id=%s 已删除，停止执行", task_id)
+        return
+
     # 2. 加载向量存储和 LLM（如需知识库）
     vector_store = None
     if task.knowledge_base_id:
@@ -304,12 +343,29 @@ def _run_evaluation_body(
     start_time = time.time()
     score_lists: Dict[str, List[float]] = {k: [] for k in SCORE_KEYS}
 
+    judge_rt = merge_ai_runtime_for_judge(get_ai_runtime(), getattr(task, "judge_config", None))
+
     # 3. 对每个测试用例：检索 → 生成（按需）→ 评估 → 保存
     for tc in test_cases:
+        if not _evaluation_task_still_present(db, task_id):
+            logging.info("评估任务 id=%s 已删除，停止执行", task_id)
+            return
+
         # 心跳：刷新任务行的 updated_at，便于检测僵死的「执行中」状态
+        task = db.get(EvaluationTask, task_id)
+        if task is None:
+            logging.info("评估任务 id=%s 已删除，停止执行", task_id)
+            return
         task.updated_at = datetime.now(BEIJING_TZ)  # type: ignore[assignment]
         db.add(task)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            if not _evaluation_task_still_present(db, task_id):
+                logging.info("评估任务 id=%s 已删除，停止执行", task_id)
+                return
+            raise
 
         retrieved_contexts: List[str] = []
         generated_answer: Optional[str] = "" if not needs_generation else None
@@ -331,6 +387,7 @@ def _run_evaluation_body(
                 answer=generated_answer or "",
                 ground_truth=tc.reference or "",
                 metrics_to_use=metrics_for_type,
+                judge_runtime=judge_rt,
             )
         except TimeoutError as e:
             logging.warning("评估用例 id=%s 超时: %s", tc.id, e)
@@ -345,6 +402,10 @@ def _run_evaluation_body(
                     score_lists[k].append(float(v))
                 except (TypeError, ValueError):
                     pass
+
+        if not _evaluation_task_still_present(db, task_id):
+            logging.info("评估任务 id=%s 已删除，中止写入结果", task_id)
+            return
 
         # 3d. 保存结果（仅持久化列上存在的指标；answer_correctness 等在 judge_details）
         def _mask_score(name: str) -> Optional[float]:
@@ -370,8 +431,22 @@ def _run_evaluation_body(
                 | {"error", "skipped", "answer_correctness"}
             },
         )
-        db.add(result)
-        db.commit()
+        try:
+            db.add(result)
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            if not _evaluation_task_still_present(db, task_id):
+                logging.info(
+                    "评估任务 id=%s 在评分完成后已删除，跳过本用例结果写入",
+                    task_id,
+                )
+                return
+            raise
+
+    if not _evaluation_task_still_present(db, task_id):
+        logging.info("评估任务 id=%s 已删除，跳过汇总", task_id)
+        return
 
     # 4. 汇总统计
     duration = time.time() - start_time
@@ -383,6 +458,9 @@ def _run_evaluation_body(
         "evaluation_type": eval_type,
         "metrics": metrics_for_type,
     }
+    jc = getattr(task, "judge_config", None)
+    if jc:
+        base_summary["judge_config"] = jc
     if not _RAGAS_AVAILABLE:
         base_summary["warning"] = (
             "RAGAS 未安装，无法计算评分。请执行: pip install ragas datasets"
@@ -392,6 +470,18 @@ def _run_evaluation_body(
         if vals:
             base_summary[label] = round(sum(vals) / len(vals), 4)
 
+    task = db.get(EvaluationTask, task_id)
+    if task is None:
+        logging.info("评估任务 id=%s 已删除，跳过汇总", task_id)
+        return
+
     task.summary = base_summary  # type: ignore
     task.status = "completed"  # type: ignore
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if not _evaluation_task_still_present(db, task_id):
+            logging.info("评估任务 id=%s 已删除，跳过完成状态写入", task_id)
+            return
+        raise

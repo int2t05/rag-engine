@@ -10,6 +10,34 @@ from pydantic import BaseModel, Field
 EvaluationType = Literal["full", "retrieval", "generation"]
 
 
+class EvaluationJudgeConfig(BaseModel):
+    """
+    任务级 RAGAS 评分运行时：与当前用户「模型配置」合并，仅覆盖已填字段。
+    可选填写专用 API Key；未填时对话/嵌入密钥仍来自全局「模型配置」。
+    """
+
+    chat_provider: Optional[Literal["openai", "ollama"]] = Field(
+        default=None,
+        description="评分用对话模型：OpenAI 兼容 API 或 Ollama",
+    )
+    embeddings_provider: Optional[Literal["openai", "ollama"]] = Field(
+        default=None,
+        description="评分用嵌入（answer_relevance / answer_correctness 等需要）",
+    )
+
+    openai_api_base: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    openai_model: Optional[str] = None
+    openai_embeddings_api_base: Optional[str] = None
+    openai_embeddings_api_key: Optional[str] = None
+    openai_embeddings_model: Optional[str] = None
+
+    ollama_api_base: Optional[str] = None
+    ollama_model: Optional[str] = None
+    ollama_embeddings_api_base: Optional[str] = None
+    ollama_embeddings_model: Optional[str] = None
+
+
 class TestCaseCreate(BaseModel):
     """评估测试用例创建请求"""
 
@@ -61,6 +89,10 @@ class EvaluationTaskCreate(BaseModel):
         default=None,
         description="可选，指定一个或多个指标；不传则按 evaluation_type 默认集合",
     )
+    judge_config: Optional[EvaluationJudgeConfig] = Field(
+        default=None,
+        description="可选，自定义 RAGAS 评分模型（与全局模型配置合并）",
+    )
     test_cases: List[TestCaseCreate]
 
 
@@ -74,6 +106,7 @@ class EvaluationTaskResponse(BaseModel):
     top_k: int
     evaluation_type: str
     evaluation_metrics: Optional[List[str]] = None
+    judge_config: Optional[dict] = None
     status: str
     error_message: Optional[str]
     summary: Optional[dict]

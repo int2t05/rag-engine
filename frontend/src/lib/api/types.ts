@@ -126,6 +126,22 @@ export interface Chat {
   knowledge_base_ids: number[];
 }
 
+/** 与后端 EvaluationJudgeConfig 一致：任务级 RAGAS 评分覆盖（与全局模型配置合并） */
+export interface EvaluationJudgeConfig {
+  chat_provider?: "openai" | "ollama";
+  embeddings_provider?: "openai" | "ollama";
+  openai_api_base?: string;
+  openai_api_key?: string;
+  openai_model?: string;
+  openai_embeddings_api_base?: string;
+  openai_embeddings_api_key?: string;
+  openai_embeddings_model?: string;
+  ollama_api_base?: string;
+  ollama_model?: string;
+  ollama_embeddings_api_base?: string;
+  ollama_embeddings_model?: string;
+}
+
 export interface EvaluationTestCaseCreate {
   query: string;
   reference?: string | null;
@@ -145,6 +161,7 @@ export interface EvaluationTask {
   top_k: number;
   evaluation_type: string;
   evaluation_metrics?: string[] | null;
+  judge_config?: EvaluationJudgeConfig | null;
   status: string;
   error_message: string | null;
   summary: Record<string, unknown> | null;

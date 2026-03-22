@@ -18,6 +18,7 @@ export type {
   ChatMessage,
   Citation,
   DocumentItem,
+  EvaluationJudgeConfig,
   EvaluationResolveResponse,
   EvaluationResult,
   EvaluationTask,

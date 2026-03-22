@@ -65,6 +65,13 @@ def create_task(
     except ValueError as e:
         raise BadRequestError(str(e)) from e
 
+    jc_dict = None
+    if task_in.judge_config is not None:
+        jc_dict = task_in.judge_config.model_dump(exclude_none=True)
+        jc_dict = {k: v for k, v in jc_dict.items() if v != ""}
+        if not jc_dict:
+            jc_dict = None
+
     task = EvaluationTask(
         name=task_in.name,
         description=task_in.description,
@@ -72,6 +79,7 @@ def create_task(
         top_k=task_in.top_k,
         evaluation_type=task_in.evaluation_type,
         evaluation_metrics=task_in.evaluation_metrics,
+        judge_config=jc_dict,
         status="pending",
         created_by=user_id,
     )
@@ -214,6 +222,13 @@ def schedule_run(
             raise BadRequestError(
                 "任务正在执行中。若服务已重启或长时间无进度，可使用查询参数 force=true 强制重新执行"
             )
+
+    # 入队前写入 running，使 GET 详情/列表与 POST /run 返回后立刻一致；
+    # 避免前端乐观更新后被 fetchTask 用仍为 pending 的数据覆盖。
+    task.status = "running"  # type: ignore
+    task.error_message = None  # type: ignore
+    db.commit()
+    db.refresh(task)
 
     background_tasks.add_task(run_evaluation_task, task_id)
     return {"message": "评估已开始执行", "task_id": task_id}

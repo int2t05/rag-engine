@@ -7,7 +7,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { evaluationApi, EvaluationTask, ApiError } from "@/lib/api";
-import { formatMetricsChips } from "@/lib/evaluation-metrics";
+import { formatMetricsChips, evaluationTypeLabel } from "@/lib/evaluation-metrics";
 import { PATH } from "@/lib/routes";
 import { PlusIcon, ChartBarIcon } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -139,7 +139,7 @@ export default function EvaluationPage() {
               </p>
               <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
                 <span>Top-K: {task.top_k}</span>
-                <span>类型: {task.evaluation_type}</span>
+                <span>类型: {evaluationTypeLabel(task.evaluation_type)}</span>
               </div>
               <p
                 className={`text-xs mb-4 line-clamp-2 ${

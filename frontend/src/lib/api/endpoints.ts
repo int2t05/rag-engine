@@ -14,6 +14,7 @@ import type {
   Chat,
   ChatMessage,
   DocumentItem,
+  EvaluationJudgeConfig,
   EvaluationResolveResponse,
   EvaluationResult,
   EvaluationTask,
@@ -222,6 +223,7 @@ export const evaluationApi = {
     top_k?: number;
     evaluation_type?: string;
     evaluation_metrics?: string[];
+    judge_config?: EvaluationJudgeConfig | null;
     test_cases: EvaluationTestCaseCreate[];
   }) => api.post<EvaluationTask>("/api/evaluation", data),
 

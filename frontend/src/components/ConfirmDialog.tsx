@@ -107,6 +107,7 @@ export function ConfirmDialog({
 
         <div className="mt-6 flex justify-end gap-3">
           <button
+            type="button"
             onClick={onCancel}
             disabled={loading}
             className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
@@ -114,6 +115,7 @@ export function ConfirmDialog({
             {cancelText}
           </button>
           <button
+            type="button"
             ref={confirmRef}
             onClick={onConfirm}
             disabled={loading}

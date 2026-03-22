@@ -10,10 +10,12 @@ import Link from "next/link";
 import {
   evaluationApi,
   knowledgeBaseApi,
+  llmConfigApi,
   ApiError,
   KnowledgeBase,
   EvaluationTestCaseCreate,
   EvaluationTypeInfo,
+  type EvaluationJudgeConfig,
 } from "@/lib/api";
 import { PATH } from "@/lib/routes";
 import {
@@ -26,6 +28,9 @@ import {
   METRIC_LABELS,
 } from "@/lib/evaluation-metrics";
 import { DEFAULT_TOP_K, parseTopK } from "@/lib/form-defaults";
+
+/** 新建任务固定为全流程（检索 + 生成），不再提供仅检索 / 仅生成类型 */
+const PIPELINE_EVAL_TYPE = "full" as const;
 import { ArrowLeftIcon, PlusIcon, TrashIcon } from "@/components/icons";
 
 export default function NewEvaluationPage() {
@@ -36,7 +41,7 @@ export default function NewEvaluationPage() {
   const [knowledgeBaseId, setKnowledgeBaseId] = useState<number | null>(null);
   /** 留空则提交时使用默认 Top-K（与后端 schema 默认一致） */
   const [topKInput, setTopKInput] = useState("");
-  const [evaluationType, setEvaluationType] = useState("full");
+  const evaluationType = PIPELINE_EVAL_TYPE;
   const [evalTypes, setEvalTypes] = useState<EvaluationTypeInfo[]>([]);
   /** 当前类型下要计算的指标（与后端类型约束一致） */
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
@@ -50,6 +55,52 @@ export default function NewEvaluationPage() {
   const [showJsonHint, setShowJsonHint] = useState(false);
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
 
+  /** RAGAS 评分模型：与「模型配置」中启用项合并；默认跟随全局 */
+  const judgePrefilledRef = useRef(false);
+  const [judgeMode, setJudgeMode] = useState<"global" | "custom">("global");
+  const [judgeChatProvider, setJudgeChatProvider] = useState<"openai" | "ollama">("openai");
+  const [judgeOpenaiBase, setJudgeOpenaiBase] = useState("");
+  const [judgeOpenaiModel, setJudgeOpenaiModel] = useState("");
+  const [judgeOllamaBase, setJudgeOllamaBase] = useState("");
+  const [judgeOllamaModel, setJudgeOllamaModel] = useState("");
+  const [judgeEmbedCustom, setJudgeEmbedCustom] = useState(false);
+  const [judgeEmbProvider, setJudgeEmbProvider] = useState<"openai" | "ollama">("openai");
+  const [judgeOpenaiEmbBase, setJudgeOpenaiEmbBase] = useState("");
+  const [judgeOpenaiEmbModel, setJudgeOpenaiEmbModel] = useState("");
+  const [judgeOllamaEmbBase, setJudgeOllamaEmbBase] = useState("");
+  const [judgeOllamaEmbModel, setJudgeOllamaEmbModel] = useState("");
+  /** 自定义评分端点专用 Key，不预填全局密钥 */
+  const [judgeOpenaiKey, setJudgeOpenaiKey] = useState("");
+  const [judgeOpenaiEmbKey, setJudgeOpenaiEmbKey] = useState("");
+
+  useEffect(() => {
+    if (judgeMode !== "custom") {
+      judgePrefilledRef.current = false;
+      return;
+    }
+    if (judgePrefilledRef.current) return;
+    judgePrefilledRef.current = true;
+    void (async () => {
+      try {
+        const res = await llmConfigApi.list();
+        const cfg = res.items.find((x) => x.id === res.active_id)?.config;
+        if (!cfg) return;
+        setJudgeChatProvider(cfg.chat_provider === "ollama" ? "ollama" : "openai");
+        setJudgeOpenaiBase(cfg.openai_api_base ?? "");
+        setJudgeOpenaiModel(cfg.openai_model ?? "");
+        setJudgeOllamaBase(cfg.ollama_api_base ?? "");
+        setJudgeOllamaModel(cfg.ollama_model ?? "");
+        setJudgeEmbProvider(cfg.embeddings_provider === "ollama" ? "ollama" : "openai");
+        setJudgeOpenaiEmbBase(cfg.openai_embeddings_api_base || cfg.openai_api_base || "");
+        setJudgeOpenaiEmbModel(cfg.openai_embeddings_model ?? "");
+        setJudgeOllamaEmbBase(cfg.ollama_embeddings_api_base || cfg.ollama_api_base || "");
+        setJudgeOllamaEmbModel(cfg.ollama_embeddings_model ?? "");
+      } catch {
+        /* 无模型配置时留空，由后端合并全局 */
+      }
+    })();
+  }, [judgeMode]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -58,35 +109,14 @@ export default function NewEvaluationPage() {
           evaluationApi.listTypes(),
         ]);
         setKbList(kbs);
-        setEvalTypes(types);
-        if (types.length > 0) {
-          setEvaluationType((prev) =>
-            types.some((t) => t.type === prev) ? prev : types[0].type,
-          );
-        }
+        setEvalTypes(types.filter((t) => t.type === PIPELINE_EVAL_TYPE));
       } catch {
         setKbList([]);
         setEvalTypes([
           {
             type: "full",
-            label: "完整评估",
-            description: "检索 + 生成 + 全指标评分",
-            metrics: [],
-            needs_retrieval: true,
-            needs_generation: true,
-          },
-          {
-            type: "retrieval",
-            label: "检索评估",
-            description: "仅检索 + 检索指标",
-            metrics: [],
-            needs_retrieval: true,
-            needs_generation: false,
-          },
-          {
-            type: "generation",
-            label: "生成评估",
-            description: "仅生成 + 生成指标",
+            label: "全流程检索与生成",
+            description: "检索 + 生成；可从全部 RAGAS 指标中勾选",
             metrics: [],
             needs_retrieval: true,
             needs_generation: true,
@@ -139,6 +169,32 @@ export default function NewEvaluationPage() {
     setImportJsonError("");
   };
 
+  const buildJudgeConfigForSubmit = (): EvaluationJudgeConfig | undefined => {
+    if (judgeMode !== "custom") return undefined;
+    const cfg: EvaluationJudgeConfig = {};
+    cfg.chat_provider = judgeChatProvider;
+    if (judgeChatProvider === "openai") {
+      if (judgeOpenaiBase.trim()) cfg.openai_api_base = judgeOpenaiBase.trim();
+      if (judgeOpenaiModel.trim()) cfg.openai_model = judgeOpenaiModel.trim();
+      if (judgeOpenaiKey.trim()) cfg.openai_api_key = judgeOpenaiKey.trim();
+    } else {
+      if (judgeOllamaBase.trim()) cfg.ollama_api_base = judgeOllamaBase.trim();
+      if (judgeOllamaModel.trim()) cfg.ollama_model = judgeOllamaModel.trim();
+    }
+    if (judgeEmbedCustom) {
+      cfg.embeddings_provider = judgeEmbProvider;
+      if (judgeEmbProvider === "openai") {
+        if (judgeOpenaiEmbBase.trim()) cfg.openai_embeddings_api_base = judgeOpenaiEmbBase.trim();
+        if (judgeOpenaiEmbModel.trim()) cfg.openai_embeddings_model = judgeOpenaiEmbModel.trim();
+        if (judgeOpenaiEmbKey.trim()) cfg.openai_embeddings_api_key = judgeOpenaiEmbKey.trim();
+      } else {
+        if (judgeOllamaEmbBase.trim()) cfg.ollama_embeddings_api_base = judgeOllamaEmbBase.trim();
+        if (judgeOllamaEmbModel.trim()) cfg.ollama_embeddings_model = judgeOllamaEmbModel.trim();
+      }
+    }
+    return cfg;
+  };
+
   const handleJsonFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -170,6 +226,7 @@ export default function NewEvaluationPage() {
     setError("");
 
     try {
+      const jc = buildJudgeConfigForSubmit();
       const task = await evaluationApi.create({
         name: name.trim(),
         description: description.trim() || null,
@@ -177,6 +234,7 @@ export default function NewEvaluationPage() {
         top_k: parseTopK(topKInput),
         evaluation_type: evaluationType,
         evaluation_metrics: [...selectedMetrics].sort(),
+        ...(jc && Object.keys(jc).length > 0 ? { judge_config: jc } : {}),
         test_cases: validCases,
       });
       router.push(PATH.evaluationDetail(task.id));
@@ -257,7 +315,7 @@ export default function NewEvaluationPage() {
           </select>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               Top-K（检索条数）
@@ -279,35 +337,220 @@ export default function NewEvaluationPage() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              评估类型
+              评估模式
             </label>
-            <select
-              value={evaluationType}
-              onChange={(e) => setEvaluationType(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {(evalTypes.length > 0
-                ? evalTypes
-                : [
-                    { type: "full", label: "完整评估", description: "" },
-                    { type: "retrieval", label: "检索评估", description: "" },
-                    { type: "generation", label: "生成评估", description: "" },
-                  ]
-              ).map((t) => (
-                <option key={t.type} value={t.type}>
-                  {t.label}
-                  {t.description ? ` — ${t.description}` : ""}
-                </option>
-              ))}
-            </select>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-sm text-gray-800">
+              {currentEvalType?.label ?? "全流程检索与生成"}
+              {currentEvalType?.description ? (
+                <span className="block text-xs text-gray-500 mt-1">
+                  {currentEvalType.description}
+                </span>
+              ) : (
+                <span className="block text-xs text-gray-500 mt-1">
+                  向量检索与答案生成一并评估，可在下方勾选具体指标。
+                </span>
+              )}
+            </div>
           </div>
+        </div>
+
+        <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-3">
+          <div>
+            <p className="text-sm font-medium text-gray-800">评分模型（RAGAS）</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              默认与「模型配置」中当前启用项一致；可单独指定 OpenAI 兼容接口或 Ollama 作为判分模型。自定义端点下可填写专用
+              API Key；留空则对话/嵌入密钥仍用全局「模型配置」。
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-4 text-sm">
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="judgeMode"
+                checked={judgeMode === "global"}
+                onChange={() => setJudgeMode("global")}
+                className="text-blue-600"
+              />
+              <span className="text-gray-800">跟随全局配置</span>
+            </label>
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="judgeMode"
+                checked={judgeMode === "custom"}
+                onChange={() => setJudgeMode("custom")}
+                className="text-blue-600"
+              />
+              <span className="text-gray-800">自定义评分端点</span>
+            </label>
+          </div>
+          {judgeMode === "custom" && (
+            <div className="space-y-3 pt-1 border-t border-gray-200">
+              <div>
+                <p className="text-xs font-medium text-gray-700 mb-2">评分对话模型</p>
+                <div className="flex flex-wrap gap-3 mb-2">
+                  <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="judgeChat"
+                      checked={judgeChatProvider === "openai"}
+                      onChange={() => setJudgeChatProvider("openai")}
+                    />
+                    OpenAI 兼容
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="judgeChat"
+                      checked={judgeChatProvider === "ollama"}
+                      onChange={() => setJudgeChatProvider("ollama")}
+                    />
+                    Ollama
+                  </label>
+                </div>
+                {judgeChatProvider === "openai" ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={judgeOpenaiBase}
+                      onChange={(e) => setJudgeOpenaiBase(e.target.value)}
+                      placeholder="API Base（可空则沿用全局）"
+                      autoComplete="off"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                    <input
+                      type="text"
+                      value={judgeOpenaiModel}
+                      onChange={(e) => setJudgeOpenaiModel(e.target.value)}
+                      placeholder="模型名（可空则沿用全局）"
+                      autoComplete="off"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs text-gray-500 mb-1">
+                        API Key（可选，用于智谱等独立网关；留空则用全局配置中的 Key）
+                      </label>
+                      <input
+                        type="password"
+                        value={judgeOpenaiKey}
+                        onChange={(e) => setJudgeOpenaiKey(e.target.value)}
+                        placeholder="sk-… 或智谱 API Key"
+                        autoComplete="new-password"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={judgeOllamaBase}
+                      onChange={(e) => setJudgeOllamaBase(e.target.value)}
+                      placeholder="Ollama 地址，如 http://localhost:11434"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                    <input
+                      type="text"
+                      value={judgeOllamaModel}
+                      onChange={(e) => setJudgeOllamaModel(e.target.value)}
+                      placeholder="模型名"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
+                )}
+              </div>
+              <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={judgeEmbedCustom}
+                  onChange={(e) => setJudgeEmbedCustom(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                单独指定评分用嵌入模型（答案相关性 / 答案正确性等指标需要；不勾选则沿用全局嵌入）
+              </label>
+              {judgeEmbedCustom && (
+                <div className="pl-0 sm:pl-1 space-y-2">
+                  <div className="flex flex-wrap gap-3">
+                    <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="radio"
+                        name="judgeEmb"
+                        checked={judgeEmbProvider === "openai"}
+                        onChange={() => setJudgeEmbProvider("openai")}
+                      />
+                      嵌入：OpenAI 兼容
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="radio"
+                        name="judgeEmb"
+                        checked={judgeEmbProvider === "ollama"}
+                        onChange={() => setJudgeEmbProvider("ollama")}
+                      />
+                      嵌入：Ollama
+                    </label>
+                  </div>
+                  {judgeEmbProvider === "openai" ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={judgeOpenaiEmbBase}
+                        onChange={(e) => setJudgeOpenaiEmbBase(e.target.value)}
+                        placeholder="嵌入 API Base"
+                        autoComplete="off"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                      <input
+                        type="text"
+                        value={judgeOpenaiEmbModel}
+                        onChange={(e) => setJudgeOpenaiEmbModel(e.target.value)}
+                        placeholder="嵌入模型名"
+                        autoComplete="off"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs text-gray-500 mb-1">
+                          嵌入 API Key（可选；留空则优先用上方对话 Key，否则全局嵌入 Key）
+                        </label>
+                        <input
+                          type="password"
+                          value={judgeOpenaiEmbKey}
+                          onChange={(e) => setJudgeOpenaiEmbKey(e.target.value)}
+                          placeholder="与对话 Key 不同时填写"
+                          autoComplete="new-password"
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={judgeOllamaEmbBase}
+                        onChange={(e) => setJudgeOllamaEmbBase(e.target.value)}
+                        placeholder="Ollama 地址"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                      <input
+                        type="text"
+                        value={judgeOllamaEmbModel}
+                        onChange={(e) => setJudgeOllamaEmbModel(e.target.value)}
+                        placeholder="嵌入模型名"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-3">
           <div>
             <p className="text-sm font-medium text-gray-800">评估指标</p>
             <p className="text-xs text-gray-500 mt-0.5">
-              选项随「评估类型」变化：检索类仅含三项检索指标；生成类仅含生成侧指标；完整评估可勾选全部六项。
+              全流程评估下可从下列六项 RAGAS 指标中勾选；默认与类型预设一致，可按需增减。
             </p>
           </div>
 

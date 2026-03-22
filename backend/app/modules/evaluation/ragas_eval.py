@@ -226,13 +226,17 @@ def metrics_need_embeddings(names: List[str]) -> bool:
     return bool(_EMBED_METRICS.intersection(names))
 
 
-def build_ragas_dependencies(need_emb: bool) -> Tuple[Any, Optional[Any]]:
+def build_ragas_dependencies(
+    need_emb: bool,
+    ai_override: Optional[AiRuntimeSettings] = None,
+) -> Tuple[Any, Optional[Any]]:
     """
     构造 (llm, embeddings)。仅在 need_embeddings 为 True 时创建嵌入，避免多余 API 调用。
+    ``ai_override`` 为 None 时使用当前上下文中的全局模型配置（get_ai_runtime）。
     """
     from app.shared.ai_runtime_context import get_ai_runtime
 
-    ai = get_ai_runtime()
+    ai = ai_override if ai_override is not None else get_ai_runtime()
     llm = build_ragas_llm(ai)
     emb = build_ragas_embeddings(ai) if need_emb else None
     return llm, emb

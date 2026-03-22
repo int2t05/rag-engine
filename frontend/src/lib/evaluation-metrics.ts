@@ -36,3 +36,58 @@ export function formatMetricsChips(ids: string[] | null | undefined): string {
   if (!ids?.length) return "";
   return ids.map(metricLabel).join(" · ");
 }
+
+/** 评估类型 API 值 → 界面展示（仅新建任务使用全流程时，列表/详情仍可能见到历史类型） */
+export function evaluationTypeLabel(type: string | null | undefined): string {
+  const t = (type ?? "").toLowerCase();
+  if (t === "full") return "全流程检索与生成";
+  if (t === "retrieval") return "检索评估";
+  if (t === "generation") return "生成评估";
+  return type ?? "";
+}
+
+const JUDGE_FIELD_LABELS: Record<string, string> = {
+  chat_provider: "评分对话",
+  embeddings_provider: "评分嵌入",
+  openai_api_base: "OpenAI Base",
+  openai_api_key: "API Key（对话）",
+  openai_model: "OpenAI 模型",
+  openai_embeddings_api_base: "嵌入 API Base",
+  openai_embeddings_api_key: "API Key（嵌入）",
+  openai_embeddings_model: "嵌入模型",
+  ollama_api_base: "Ollama 地址",
+  ollama_model: "Ollama 模型",
+  ollama_embeddings_api_base: "嵌入 Ollama 地址",
+  ollama_embeddings_model: "嵌入模型",
+};
+
+function maskSecret(raw: string): string {
+  if (raw.length <= 8) return "••••••••";
+  return `${raw.slice(0, 4)}…${raw.slice(-4)}（已保存）`;
+}
+
+function formatJudgeValue(key: string, raw: string): string {
+  if (key === "chat_provider" || key === "embeddings_provider") {
+    if (raw === "openai") return "OpenAI 兼容";
+    if (raw === "ollama") return "Ollama";
+  }
+  if (key === "openai_api_key" || key === "openai_embeddings_api_key") {
+    return maskSecret(raw);
+  }
+  return raw;
+}
+
+/** 展示任务上保存的 judge_config（键值简要列表） */
+export function formatJudgeConfigLines(
+  cfg: Record<string, unknown> | null | undefined,
+): { label: string; value: string }[] {
+  if (!cfg || typeof cfg !== "object") return [];
+  const out: { label: string; value: string }[] = [];
+  for (const [k, v] of Object.entries(cfg)) {
+    if (v === null || v === undefined || v === "") continue;
+    const label = JUDGE_FIELD_LABELS[k] ?? k;
+    const s = typeof v === "string" ? v : String(v);
+    out.push({ label, value: formatJudgeValue(k, s) });
+  }
+  return out;
+}

@@ -10,7 +10,11 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import type { EvaluationTestCase } from "@/lib/api";
 import { PATH } from "@/lib/routes";
-import { METRIC_LABELS } from "@/lib/evaluation-metrics";
+import {
+  METRIC_LABELS,
+  evaluationTypeLabel,
+  formatJudgeConfigLines,
+} from "@/lib/evaluation-metrics";
 import { useEvaluationTaskDetail } from "@/hooks/useEvaluationTaskDetail";
 import { ArrowLeftIcon } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -93,6 +97,14 @@ export default function EvaluationDetailPage() {
   const effectiveMetricIds =
     task.evaluation_metrics?.length ? task.evaluation_metrics : metricsFromRun;
 
+  const showMetricScore = (metricId: string) =>
+    !effectiveMetricIds?.length || effectiveMetricIds.includes(metricId);
+
+  const judgeConfigLines =
+    task.judge_config && typeof task.judge_config === "object"
+      ? formatJudgeConfigLines(task.judge_config as Record<string, unknown>)
+      : [];
+
   return (
     <div className="mx-auto max-w-4xl">
       <div className="mb-6">
@@ -136,7 +148,7 @@ export default function EvaluationDetailPage() {
                   disabled={runSubmitting}
                   className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900 transition-colors hover:bg-amber-100 disabled:opacity-50"
                 >
-                  强制重新执行
+                  {runSubmitting ? "提交中…" : "强制重新执行"}
                 </button>
               </>
             )}
@@ -177,9 +189,25 @@ export default function EvaluationDetailPage() {
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <p className="text-xs text-gray-500">评估类型</p>
-          <p className="mt-1 text-sm font-medium text-gray-800">{task.evaluation_type}</p>
+          <p className="mt-1 text-sm font-medium text-gray-800">
+            {evaluationTypeLabel(task.evaluation_type)}
+          </p>
         </div>
       </div>
+
+      {judgeConfigLines.length > 0 && (
+        <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4">
+          <p className="mb-2 text-xs text-gray-500">评分模型覆盖（RAGAS）</p>
+          <dl className="grid grid-cols-1 gap-1.5 text-sm sm:grid-cols-2">
+            {judgeConfigLines.map(({ label, value }, idx) => (
+              <div key={`${label}-${idx}`} className="flex flex-wrap gap-x-2">
+                <dt className="text-gray-500">{label}</dt>
+                <dd className="font-mono text-xs text-gray-800 break-all">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
 
       <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4">
         <p className="mb-2 text-xs text-gray-500">选用指标</p>
@@ -284,26 +312,27 @@ export default function EvaluationDetailPage() {
                     </div>
                   )}
                   <div className="mb-2 flex flex-wrap gap-3 text-xs">
-                    {r.context_relevance != null && (
+                    {showMetricScore("context_relevance") && r.context_relevance != null && (
                       <span className="text-gray-600">
                         上下文相关性: {formatScore(r.context_relevance)}
                       </span>
                     )}
-                    {r.faithfulness != null && (
+                    {showMetricScore("faithfulness") && r.faithfulness != null && (
                       <span className="text-gray-600">忠实度: {formatScore(r.faithfulness)}</span>
                     )}
-                    {r.answer_relevance != null && (
+                    {showMetricScore("answer_relevance") && r.answer_relevance != null && (
                       <span className="text-gray-600">
                         答案相关性: {formatScore(r.answer_relevance)}
                       </span>
                     )}
-                    {r.context_recall != null && (
+                    {showMetricScore("context_recall") && r.context_recall != null && (
                       <span className="text-gray-600">召回: {formatScore(r.context_recall)}</span>
                     )}
-                    {r.context_precision != null && (
+                    {showMetricScore("context_precision") && r.context_precision != null && (
                       <span className="text-gray-600">精度: {formatScore(r.context_precision)}</span>
                     )}
-                    {r.judge_details &&
+                    {showMetricScore("answer_correctness") &&
+                      r.judge_details &&
                       typeof (r.judge_details as Record<string, unknown>).answer_correctness ===
                         "number" && (
                         <span className="text-gray-600">
@@ -392,8 +421,7 @@ export default function EvaluationDetailPage() {
         variant="default"
         loading={runSubmitting}
         onConfirm={() => {
-          setShowForceRunConfirm(false);
-          void handleForceRun();
+          void handleForceRun().finally(() => setShowForceRunConfirm(false));
         }}
         onCancel={() => setShowForceRunConfirm(false)}
       />

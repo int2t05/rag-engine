@@ -1,7 +1,7 @@
 /**
  * @fileoverview 评估任务详情页数据与操作
  * @description 依赖接口：
- * - GET /api/evaluation/resolve/{id}（经 getEvaluationTaskDeduped）
+ * - GET /api/evaluation/{id}（直连，不复用 resolve 去重，避免 POST /run 后仍拿到旧 in-flight 数据）
  * - GET /api/evaluation/{id}/results
  * - POST /api/evaluation/{id}/run
  * - POST /api/evaluation/{id}/test-cases/import
@@ -10,13 +10,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import { evaluationApi, ApiError, type EvaluationResult, type EvaluationTask } from "@/lib/api";
 import { PATH } from "@/lib/routes";
 import { parseEvaluationQaJson } from "@/lib/evaluation-import";
 import {
   addMissingIdToStorage,
-  getEvaluationTaskDeduped,
   knownMissingTaskIds,
   readMissingIdsFromStorage,
   removeMissingIdFromStorage,
@@ -24,6 +24,9 @@ import {
 
 export function useEvaluationTaskDetail(taskId: number) {
   const router = useRouter();
+
+  /** 并发拉任务时只采纳最后一次结果，避免慢请求覆盖新状态 */
+  const fetchTaskGenRef = useRef(0);
 
   const [task, setTask] = useState<EvaluationTask | null>(null);
   const [results, setResults] = useState<EvaluationResult[]>([]);
@@ -59,13 +62,16 @@ export function useEvaluationTaskDetail(taskId: number) {
   }, []);
 
   const fetchTask = useCallback(async () => {
+    const gen = ++fetchTaskGenRef.current;
     try {
-      const t = await getEvaluationTaskDeduped(taskId);
+      const t = await evaluationApi.get(taskId);
+      if (gen !== fetchTaskGenRef.current) return t;
       setTask(t);
       knownMissingTaskIds.delete(taskId);
       removeMissingIdFromStorage(taskId);
       return t;
     } catch (err) {
+      if (gen !== fetchTaskGenRef.current) return null;
       if (err instanceof ApiError && err.status === 404) {
         knownMissingTaskIds.add(taskId);
         addMissingIdToStorage(taskId);
@@ -104,6 +110,8 @@ export function useEvaluationTaskDetail(taskId: number) {
       return;
     }
 
+    fetchTaskGenRef.current += 1;
+
     let cancelled = false;
 
     (async () => {
@@ -128,37 +136,47 @@ export function useEvaluationTaskDetail(taskId: number) {
   }, [taskId, router, fetchTask, fetchResults]);
 
   const handleRun = useCallback(async () => {
-    setRunSubmitting(true);
-    setError("");
+    flushSync(() => {
+      setRunSubmitting(true);
+      setError("");
+    });
     try {
       await evaluationApi.run(taskId);
+      // 接口返回后立即更新状态与提示，避免用户感觉「点了没反应」
+      setTask((prev) => (prev ? { ...prev, status: "running" } : prev));
+      showToastMsg("已提交，任务正在后台执行", "success");
       await fetchTask();
       await fetchResults();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "执行失败");
+      await fetchTask();
     } finally {
       setRunSubmitting(false);
     }
-  }, [taskId, fetchTask, fetchResults]);
+  }, [taskId, fetchTask, fetchResults, showToastMsg]);
 
   /** 任务卡在「执行中」（如后端重启）时使用，对应 POST .../run?force=true */
   const handleForceRun = useCallback(async () => {
-    setRunSubmitting(true);
-    setError("");
+    flushSync(() => {
+      setRunSubmitting(true);
+      setError("");
+    });
     try {
       await evaluationApi.run(taskId, { force: true });
+      setTask((prev) => (prev ? { ...prev, status: "pending" } : prev));
+      showToastMsg("已重新排队，即将开始执行", "success");
       await fetchTask();
       await fetchResults();
-      showToastMsg("已强制重新排队执行", "success");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "执行失败");
+      await fetchTask();
     } finally {
       setRunSubmitting(false);
     }
   }, [taskId, fetchTask, fetchResults, showToastMsg]);
 
   const handleRefreshStatus = useCallback(async () => {
-    setRefreshingStatus(true);
+    flushSync(() => setRefreshingStatus(true));
     try {
       await refreshTaskAndResults();
     } finally {

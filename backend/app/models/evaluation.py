@@ -25,6 +25,8 @@ class EvaluationTask(Base, TimestampMixin):
     evaluation_type = Column(String(50), default="full")  # retrieval / generation / full
     # 可选：自定义要计算的指标名列表（JSON 数组），为空则按 evaluation_type 默认指标
     evaluation_metrics = Column(JSON, nullable=True)
+    # 可选：RAGAS 评分模型覆盖（与「模型配置」合并，仅覆盖已填字段；不含 API Key）
+    judge_config = Column(JSON, nullable=True)
 
     # 状态
     status = Column(String(20), default="pending")  # pending / running / completed / failed
