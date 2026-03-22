@@ -14,6 +14,8 @@ export const PATH = {
   knowledgeBaseEdit: (id: string | number) => `/dashboard/knowledge-base/${id}/edit`,
   documentDetail: (kbId: string | number, docId: string | number) =>
     `/dashboard/knowledge-base/${kbId}/documents/${docId}`,
+  chunkDetail: (kbId: string | number, chunkId: string) =>
+    `/dashboard/knowledge-base/${kbId}/chunks/${encodeURIComponent(chunkId)}`,
   chat: "/dashboard/chat",
   evaluation: "/dashboard/evaluation",
   evaluationNew: "/dashboard/evaluation/new",

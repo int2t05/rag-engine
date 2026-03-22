@@ -285,6 +285,11 @@ export default function KnowledgeBaseDetailPage() {
             <p className="text-sm text-gray-500 mt-1">
               {kb.description || "暂无描述"}
             </p>
+            {kb.parent_child_chunking ? (
+              <p className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-2 py-1 inline-block">
+                已启用父子分块入库（新文档子块入向量；对话需勾选「父子块展开」）
+              </p>
+            ) : null}
           </div>
           <Link
             href={PATH.knowledgeBaseEdit(kb.id)}

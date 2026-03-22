@@ -377,6 +377,8 @@ async def preview_kb_documents(
 ) -> Dict[int, PreviewResult]:
     """按文档 ID 校验归属（含 kb_id）；document_ids 为空时直接返回空字典。"""
     repo = KnowledgeRepository(db)
+    kb_ent = repo.get_owned_kb(kb_id, user_id)
+    use_pc = bool(kb_ent and kb_ent.parent_child_chunking) or settings.RAG_PARENT_CHILD_INGEST
     results: Dict[int, PreviewResult] = {}
     for doc_id in preview_request.document_ids:
         document = repo.get_document_owned(kb_id, doc_id, user_id)
@@ -392,6 +394,8 @@ async def preview_kb_documents(
             file_path,
             chunk_size=preview_request.chunk_size,
             chunk_overlap=preview_request.chunk_overlap,
+            kb_id=kb_id,
+            use_parent_child=use_pc,
         )
         results[doc_id] = preview
 

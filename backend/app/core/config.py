@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     CHROMA_DB_HOST: str = Field(default="localhost", alias="CHROMA_DB_HOST")
     CHROMA_DB_PORT: int = Field(default=8001, alias="CHROMA_DB_PORT")
 
+    # ---------- RAG 入库：全局兜底。优先以知识库「父子分块入库」开关为准（可前端配置）----------
+    RAG_PARENT_CHILD_INGEST: bool = Field(
+        default=False, alias="RAG_PARENT_CHILD_INGEST"
+    )
+
     # LLM / 嵌入 API 由用户在「模型配置」中写入数据库，不经由本文件或 .env
 
     # ---------- Pydantic V2 配置 ----------

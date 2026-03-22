@@ -35,7 +35,12 @@ def create_knowledge_base(
     db: Session, user_id: int, kb_in: KnowledgeBaseCreate
 ) -> KnowledgeBase:
     """新建知识库并 commit。"""
-    kb = KnowledgeBase(name=kb_in.name, description=kb_in.description, user_id=user_id)
+    kb = KnowledgeBase(
+        name=kb_in.name,
+        description=kb_in.description,
+        user_id=user_id,
+        parent_child_chunking=kb_in.parent_child_chunking,
+    )
     db.add(kb)
     db.commit()
     db.refresh(kb)

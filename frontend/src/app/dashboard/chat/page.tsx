@@ -13,6 +13,7 @@ import {
   MessageBubble,
   LoadingDots,
   NewChatModal,
+  RagOptionsBar,
 } from "@/components/chat";
 import { useChatSession } from "@/hooks/useChatSession";
 
@@ -57,6 +58,12 @@ export default function ChatPage() {
     handleKeyDown,
     handleNewChat,
     closeNewChatModal,
+    ragOptions,
+    setRagOptions,
+    ragPanelOpen,
+    setRagPanelOpen,
+    topKInput,
+    setTopKInput,
   } = useChatSession();
 
   if (loading) {
@@ -157,6 +164,15 @@ export default function ChatPage() {
             </div>
 
             <div className="border-t border-gray-200 bg-white p-3 md:p-4">
+              <RagOptionsBar
+                open={ragPanelOpen}
+                onToggle={() => setRagPanelOpen((o) => !o)}
+                options={ragOptions}
+                onChange={setRagOptions}
+                topKInput={topKInput}
+                onTopKInputChange={setTopKInput}
+                disabled={sending || streaming}
+              />
               <div className="mx-auto flex max-w-3xl items-end gap-2 md:gap-3">
                 <textarea
                   ref={inputRef}

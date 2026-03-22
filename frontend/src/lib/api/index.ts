@@ -14,6 +14,7 @@ export {
 
 export type {
   AiRuntimeSettings,
+  ChunkDetail,
   Chat,
   ChatMessage,
   Citation,
@@ -32,6 +33,7 @@ export type {
   PreviewChunk,
   PreviewResult,
   ProcessingTask,
+  RagPipelineOptions,
   RetrievalResult,
   TaskStatus,
   UploadResult,

@@ -123,7 +123,7 @@ async def create_message_endpoint(
 
     # 1. 获取对话上下文：验证用户对对话的所有权
     try:
-        _, knowledge_base_ids, messages = get_stream_context(
+        _, knowledge_base_ids, messages, rag_options = get_stream_context(
             db, current_user.id, chat_id, body
         )
     except ResourceNotFoundError as e:
@@ -148,6 +148,7 @@ async def create_message_endpoint(
                 chat_id=chat_id,  # 关联对话 ID
                 db=db,  # 复用已有会话（注意事务边界）
                 client_disconnected=disconnect_check,  # 断开检测（节省服务端资源）
+                rag_options=rag_options,
             ):
                 yield chunk
         finally:

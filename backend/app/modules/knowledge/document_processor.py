@@ -21,7 +21,7 @@ import traceback
 from datetime import datetime
 from app.db.session import SessionLocal
 from io import BytesIO
-from typing import Optional, List, Dict, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 from fastapi import UploadFile
 from langchain_community.document_loaders import (
     PyPDFLoader,
@@ -31,7 +31,7 @@ from langchain_community.document_loaders import (
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document as LangchainDocument
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.minio import get_minio_client
@@ -42,7 +42,10 @@ from minio import Minio
 from minio.commonconfig import CopySource
 from app.shared.vector_store import VectorStoreFactory
 from app.shared.embedding.embedding_factory import EmbeddingsFactory
-from app.shared.ai_runtime_loader import AiRuntimeNotConfigured, load_ai_runtime_for_user
+from app.shared.ai_runtime_loader import (
+    AiRuntimeNotConfigured,
+    load_ai_runtime_for_user,
+)
 from app.shared.ai_runtime_context import reset_ai_runtime_token, set_ai_runtime_token
 from app.shared.ai_runtime_scope import ai_runtime_scope
 
@@ -69,6 +72,57 @@ class PreviewResult(BaseModel):
 
     chunks: List[TextChunk]
     total_chunks: int
+    #: 父子分块时父块规格（增量入库用）；不参与 API 序列化
+    parent_rows_spec: List[Dict[str, Any]] = Field(default_factory=list, exclude=True)
+
+
+def split_documents_for_kb_ingest(
+    documents: List[LangchainDocument],
+    *,
+    kb_id: int,
+    file_name: str,
+    chunk_size: int,
+    chunk_overlap: int,
+    use_parent_child: bool,
+) -> Tuple[List[LangchainDocument], List[Dict[str, Any]]]:
+    """
+    按知识库策略分块：普通递归分块，或父子分块（仅返回子块列表 + 父块元数据列表）。
+    """
+    # 1. 非父子分块模式：直接按指定大小切分
+    if not use_parent_child:
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size, chunk_overlap=chunk_overlap
+        )
+        out = text_splitter.split_documents(documents)
+        return out, []
+    # 2. 父子分块模式：创建双层拆分器
+    parent_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=max(chunk_size * 2, 1600),
+        chunk_overlap=min(chunk_overlap * 2, 200),
+    )
+    child_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=max(chunk_size // 2, 400),
+        chunk_overlap=min(chunk_overlap // 2, 80),
+    )
+    child_docs: List[LangchainDocument] = []
+    parent_rows_spec: List[Dict[str, Any]] = []
+    # 3. 对每个父块生成 ID 和元数据
+    for parent_doc in parent_splitter.split_documents(documents):
+        parent_id = hashlib.sha256(
+            f"{kb_id}:{file_name}:parent:{parent_doc.page_content}".encode()
+        ).hexdigest()
+        pm = dict(parent_doc.metadata)
+        pm["source"] = file_name
+        pm["kb_id"] = kb_id
+        pm["chunk_id"] = parent_id
+        pm["is_parent"] = True
+        parent_rows_spec.append(
+            {"id": parent_id, "page_content": parent_doc.page_content, "meta": pm}
+        )
+        for child in child_splitter.split_documents([parent_doc]):
+            child.metadata["parent_chunk_id"] = parent_id
+            child_docs.append(child)
+    return child_docs, parent_rows_spec
 
 
 async def process_document(
@@ -99,7 +153,18 @@ async def process_document(
         raise RuntimeError(e.detail) from e
     tok = set_ai_runtime_token(rt)
     try:
-        preview_result = await preview_document(file_path, chunk_size, chunk_overlap)
+        kb_entity = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+        use_pc = (
+            bool(kb_entity and kb_entity.parent_child_chunking)
+            or settings.RAG_PARENT_CHILD_INGEST
+        )
+        preview_result = await preview_document(
+            file_path,
+            chunk_size,
+            chunk_overlap,
+            kb_id=kb_id,
+            use_parent_child=use_pc,
+        )
 
         # 初始化 embeddings
         logger.info("初始化 embeddings模型...")
@@ -117,9 +182,35 @@ async def process_document(
         # 获取该文件的现有块哈希值
         existing_hashes = chunk_manager.list_chunks(file_name)
 
+        # 当前版本应保留的全部块哈希（子块 + 父子策略下的父块）。
+        # 仅收集子块会导致 get_deleted_chunks 把父块整表删掉，增量替换后父块丢失。
+        current_hashes: Set[str] = set()
+
+        # 父子分块：先写入父块记录（不向量化）
+        if preview_result.parent_rows_spec:
+            parent_db_rows: List[Dict[str, Any]] = []
+            for ps in preview_result.parent_rows_spec:
+                pid = ps["id"]
+                pmeta = dict(ps["meta"])
+                pmeta["document_id"] = document_id
+                ph = hashlib.sha256(
+                    (ps["page_content"] + str(pmeta)).encode()
+                ).hexdigest()
+                current_hashes.add(ph)
+                parent_db_rows.append(
+                    {
+                        "id": pid,
+                        "kb_id": kb_id,
+                        "document_id": document_id,
+                        "file_name": file_name,
+                        "metadata": {"page_content": ps["page_content"], **pmeta},
+                        "hash": ph,
+                    }
+                )
+            chunk_manager.add_chunks(parent_db_rows)
+
         # 准备新的块
         new_chunks = []
-        current_hashes = set()
         documents_to_update = []
 
         for chunk in preview_result.chunks:
@@ -233,13 +324,18 @@ async def upload_document(file: UploadFile, kb_id: int) -> UploadResult:
 
 
 async def preview_document(
-    file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200
+    file_path: str,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+    *,
+    kb_id: int = 0,
+    use_parent_child: bool = False,
 ) -> PreviewResult:
     """
     从 MinIO 下载文件，解析并分块，返回预览结果。
 
     支持格式：PDF、DOCX、Markdown、TXT。
-    使用 RecursiveCharacterTextSplitter 进行递归分块。
+    `use_parent_child` 须配合有效 `kb_id`；与知识库「父子分块入库」开关或全局 RAG_PARENT_CHILD_INGEST 一致。
     """
     # 从MinIO获取文件
     minio_client = get_minio_client()
@@ -269,20 +365,27 @@ async def preview_document(
         else:  # 默认为文本加载器
             loader = TextLoader(temp_path, encoding="utf-8")
 
-        # 加载和拆分文档 递归分块
         documents = loader.load()
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size, chunk_overlap=chunk_overlap
+        file_name = os.path.basename(file_path)
+        eff_pc = bool(use_parent_child and kb_id > 0)
+        chunks_lc, parent_spec = split_documents_for_kb_ingest(
+            documents,
+            kb_id=kb_id,
+            file_name=file_name,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            use_parent_child=eff_pc,
         )
-        chunks = text_splitter.split_documents(documents)
-
-        # 转换为预览格式
         preview_chunks = [
-            TextChunk(content=chunk.page_content, metadata=chunk.metadata)
-            for chunk in chunks
+            TextChunk(content=c.page_content, metadata=dict(c.metadata or {}))
+            for c in chunks_lc
         ]
 
-        return PreviewResult(chunks=preview_chunks, total_chunks=len(chunks))
+        return PreviewResult(
+            chunks=preview_chunks,
+            total_chunks=len(preview_chunks),
+            parent_rows_spec=parent_spec,
+        )
     finally:
         # 手动删除临时文件
         os.unlink(temp_path)
@@ -323,9 +426,9 @@ def _process_document_background_sync(
         logger.error(f"找不到任务{task_id}")
         return
 
+    kb_row = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
     uid = user_id
     if uid is None:
-        kb_row = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
         uid = kb_row.user_id if kb_row else None
 
     try:
@@ -375,11 +478,24 @@ def _process_document_background_sync(
             logger.info(f"任务{task_id}：文档加载成功")
 
             logger.info(f"任务{task_id}：将文档拆分为块")
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=chunk_size, chunk_overlap=chunk_overlap
+            use_pc = (
+                bool(kb_row and kb_row.parent_child_chunking)
+                or settings.RAG_PARENT_CHILD_INGEST
             )
-            chunks = text_splitter.split_documents(documents)
-            logger.info(f"任务{task_id}：文档拆分为{len(chunks)}个块")
+            chunks, parent_rows_spec = split_documents_for_kb_ingest(
+                documents,
+                kb_id=kb_id,
+                file_name=file_name,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                use_parent_child=use_pc,
+            )
+            if use_pc:
+                logger.info(
+                    f"任务{task_id}：父子分块 父块={len(parent_rows_spec)} 子块={len(chunks)}"
+                )
+            else:
+                logger.info(f"任务{task_id}：文档拆分为{len(chunks)}个块")
 
             if uid is None:
                 raise Exception("无法确定知识库所属用户，无法加载嵌入配置")
@@ -437,6 +553,31 @@ def _process_document_background_sync(
                 # Document.processing_tasks 在处理阶段为空，知识库详情无法展示「处理中」）
                 task.document_id = document.id  # type: ignore
                 db.commit()
+
+                # 5b. 父子分块：父块仅入库，不向量化
+                if parent_rows_spec:
+                    logger.info(
+                        f"任务{task_id}：写入父块记录 {len(parent_rows_spec)} 条（不向量化）"
+                    )
+                    for ps in parent_rows_spec:
+                        pid = ps["id"]
+                        pmeta = dict(ps["meta"])
+                        pmeta["document_id"] = document.id
+                        doc_chunk = DocumentChunk(
+                            id=pid,
+                            document_id=document.id,
+                            kb_id=kb_id,
+                            file_name=file_name,
+                            chunk_metadata={
+                                "page_content": ps["page_content"],
+                                **pmeta,
+                            },
+                            hash=hashlib.sha256(
+                                (ps["page_content"] + str(pmeta)).encode()
+                            ).hexdigest(),
+                        )
+                        db.add(doc_chunk)
+                    db.commit()
 
                 # 6. 存储文档块
                 logger.info(f"任务 {task_id}：存储文档块")

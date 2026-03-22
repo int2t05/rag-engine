@@ -20,6 +20,8 @@ export default function NewKnowledgeBasePage() {
   const [name, setName] = useState("");
   /** 知识库描述 */
   const [description, setDescription] = useState("");
+  /** 父子分块入库（与后端知识库字段一致） */
+  const [parentChildChunking, setParentChildChunking] = useState(false);
   /** 错误信息 */
   const [error, setError] = useState("");
   /** 提交状态 */
@@ -46,6 +48,7 @@ export default function NewKnowledgeBasePage() {
       await knowledgeBaseApi.create({
         name: name.trim(),
         description: description.trim() || null,
+        parent_child_chunking: parentChildChunking,
       });
       router.push(PATH.knowledgeBase);
     } catch (err) {
@@ -89,6 +92,22 @@ export default function NewKnowledgeBasePage() {
             maxLength={255}
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
+        </div>
+
+        <div className="flex items-start gap-2 rounded-lg border border-gray-100 bg-gray-50/80 p-3">
+          <input
+            id="kb-pc-new"
+            type="checkbox"
+            checked={parentChildChunking}
+            onChange={(e) => setParentChildChunking(e.target.checked)}
+            className="mt-0.5 rounded border-gray-300"
+          />
+          <label htmlFor="kb-pc-new" className="text-sm text-gray-700">
+            <span className="font-medium">父子分块入库</span>
+            <span className="mt-0.5 block text-xs text-gray-500">
+              开启后新文档仅将子块写入向量库，父块存 MySQL；对话中仍需勾选「父子块展开」才会用父块全文回答。
+            </span>
+          </label>
         </div>
 
         {/* 描述 */}

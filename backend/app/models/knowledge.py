@@ -11,7 +11,7 @@ RAG 文档处理流程对应的表：
 4. 处理完成 → 更新 ProcessingTask.status=completed，DocumentUpload.status=completed
 """
 
-from sqlalchemy import Column, Integer, String, ForeignKey, Text, DateTime, JSON, BigInteger, TIMESTAMP, text
+from sqlalchemy import Column, Integer, String, ForeignKey, Text, DateTime, JSON, BigInteger, TIMESTAMP, text, Boolean
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin, BEIJING_TZ
@@ -29,6 +29,7 @@ class KnowledgeBase(Base, TimestampMixin):
     - name: 知识库名称
     - description: 知识库描述
     - user_id: 创建者
+    - parent_child_chunking: 入库时是否使用父子分块（仅子块入向量库）
     """
     __tablename__ = "knowledge_bases"
 
@@ -36,6 +37,9 @@ class KnowledgeBase(Base, TimestampMixin):
     name = Column(String(255), nullable=False)
     description = Column(LONGTEXT)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    parent_child_chunking = Column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
 
     documents = relationship("Document", back_populates="knowledge_base", cascade="all, delete-orphan")
     user = relationship("User", back_populates="knowledge_bases")

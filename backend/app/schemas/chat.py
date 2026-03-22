@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 
+from app.schemas.rag_pipeline import RagPipelineOptions
+
 
 class MessageBase(BaseModel):
     """消息基础字段"""
@@ -53,6 +55,7 @@ class StreamMessagesRequest(BaseModel):
     """
 
     messages: List[ChatMessageItem]
+    rag_options: Optional[RagPipelineOptions] = None
 
 
 class ChatCreate(ChatBase):

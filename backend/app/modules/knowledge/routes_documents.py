@@ -26,11 +26,14 @@ from app.models.user import User
 from app.schemas.ai_runtime import AiRuntimeSettings
 from app.schemas.knowledge import (
     BatchDeleteDocumentsRequest,
+    ChunkDetailResponse,
     DocumentResponse,
     PreviewRequest,
     TestRetrievalRequest,
 )
 from app.modules.knowledge.document_processor import PreviewResult
+from app.models.knowledge import Document, DocumentChunk
+from app.modules.knowledge.repository import KnowledgeRepository
 from app.modules.knowledge import (
     batch_delete_documents,
     cleanup_temp_files,
@@ -223,6 +226,44 @@ async def batch_delete_documents_endpoint(
         raise HTTPException(status_code=404, detail=e.detail) from e
     except BadRequestError as e:
         raise HTTPException(status_code=400, detail=e.detail) from e
+
+
+@router.get("/{kb_id}/chunks/{chunk_id}", response_model=ChunkDetailResponse)
+def get_chunk_detail_endpoint(
+    kb_id: int,
+    chunk_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """单条分块详情（引用跳转）；校验知识库归属。"""
+    repo = KnowledgeRepository(db)
+    if repo.get_owned_kb(kb_id, current_user.id) is None:
+        raise HTTPException(status_code=404, detail=f"未找到知识库{kb_id}")
+    chunk = (
+        db.query(DocumentChunk)
+        .filter(DocumentChunk.id == chunk_id, DocumentChunk.kb_id == kb_id)
+        .first()
+    )
+    if chunk is None:
+        raise HTTPException(status_code=404, detail="未找到分块")
+    doc_row = None
+    if chunk.document_id:
+        doc_row = (
+            db.query(Document)
+            .filter(
+                Document.id == chunk.document_id,
+                Document.knowledge_base_id == kb_id,
+            )
+            .first()
+        )
+    return ChunkDetailResponse(
+        id=chunk.id,
+        kb_id=chunk.kb_id,
+        document_id=chunk.document_id,
+        file_name=chunk.file_name,
+        chunk_metadata=chunk.chunk_metadata,
+        document_file_path=doc_row.file_path if doc_row else None,
+    )
 
 
 @router.post("/test-retrieval")

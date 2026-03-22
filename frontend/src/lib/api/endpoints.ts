@@ -25,7 +25,9 @@ import type {
   LlmEmbeddingConfigListResponse,
   PreviewResult,
   ReplaceDocumentResult,
+  ChunkDetail,
   RetrievalResult,
+  RagPipelineOptions,
   TaskStatus,
   UploadResult,
 } from "./types";
@@ -39,11 +41,20 @@ export const knowledgeBaseApi = {
 
   get: (id: number) => api.get<KnowledgeBase>(`/api/knowledge-base/${id}`),
 
-  create: (data: { name: string; description?: string | null }) =>
-    api.post<KnowledgeBase>("/api/knowledge-base", data),
+  create: (data: {
+    name: string;
+    description?: string | null;
+    parent_child_chunking?: boolean;
+  }) => api.post<KnowledgeBase>("/api/knowledge-base", data),
 
-  update: (id: number, data: { name: string; description?: string | null }) =>
-    api.put<KnowledgeBase>(`/api/knowledge-base/${id}`, data),
+  update: (
+    id: number,
+    data: {
+      name: string;
+      description?: string | null;
+      parent_child_chunking?: boolean;
+    },
+  ) => api.put<KnowledgeBase>(`/api/knowledge-base/${id}`, data),
 
   delete: (id: number) =>
     api.delete<{ message: string; warnings?: string[] }>(`/api/knowledge-base/${id}`),
@@ -74,6 +85,14 @@ export const knowledgeBaseApi = {
 
   getDocument: (kbId: number, docId: number) =>
     api.get<DocumentItem>(`/api/knowledge-base/${kbId}/documents/${docId}`),
+
+  /**
+   * 单条分块详情（引用跳转）
+   */
+  getChunk: (kbId: number, chunkId: string) =>
+    api.get<ChunkDetail>(
+      `/api/knowledge-base/${kbId}/chunks/${encodeURIComponent(chunkId)}`,
+    ),
 
   /**
    * 同名重新上传已入库文档，FormData 字段名 `file`；
@@ -169,16 +188,27 @@ export const chatApi = {
    * POST /api/chat/{chatId}/messages，SSE 流；不受 fetchApi 默认超时限制
    * @param messages 完整历史，末条须为 user（与 StreamMessagesRequest 一致）
    */
-  sendMessage: (chatId: number, messages: ChatMessage[], signal?: AbortSignal) => {
+  sendMessage: (
+    chatId: number,
+    messages: ChatMessage[],
+    signal?: AbortSignal,
+    ragOptions?: RagPipelineOptions,
+  ) => {
     const token =
       typeof window !== "undefined" ? localStorage.getItem("token") : "";
+    const body: { messages: ChatMessage[]; rag_options?: RagPipelineOptions } = {
+      messages,
+    };
+    if (ragOptions) {
+      body.rag_options = ragOptions;
+    }
     return fetch(`${API_BASE}/api/chat/${chatId}/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(token && { Authorization: `Bearer ${token}` }),
       },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify(body),
       signal,
     });
   },

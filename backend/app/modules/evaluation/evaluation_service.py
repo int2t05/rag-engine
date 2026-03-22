@@ -35,7 +35,7 @@ from app.modules.evaluation.evaluation_config import (
 from app.shared.embedding.embedding_factory import EmbeddingsFactory
 from app.shared.llm.llm_factory import LLMFactory
 from app.shared.vector_store import VectorStoreFactory
-from app.shared.rag_dedupe import dedupe_retrieved_documents
+from app.modules.chat.rag.retrieval_core import retrieve_for_context, truncate_to_top_k
 from app.shared.ai_runtime_loader import AiRuntimeNotConfigured
 from app.schemas.ai_runtime import AiRuntimeSettings
 from app.shared.ai_runtime_context import get_ai_runtime
@@ -81,12 +81,26 @@ def _retrieve(
     query: str,
     vector_store: Any,
     top_k: int,
+    db: Session,
+    kb_id: int,
 ) -> List[str]:
-    """检索阶段：对 query 进行向量检索，返回 top_k 个文档片段文本。"""
+    """
+    检索阶段：与对话 Native 路径一致（纯向量、多查询合并逻辑在 retrieval_core）。
+    """
 
     def _inner() -> List[str]:
-        docs = vector_store.similarity_search(query, k=top_k)
-        docs = dedupe_retrieved_documents(docs)
+        pairs = [(kb_id, vector_store)]
+        docs = retrieve_for_context(
+            db=db,
+            vector_store_pairs=pairs,
+            kb_ids_for_corpus=[kb_id],
+            queries=[query],
+            multi_kb=False,
+            top_k=top_k,
+            hybrid=False,
+            hybrid_vector_weight=0.5,
+        )
+        docs = truncate_to_top_k(docs, top_k)
         return [d.page_content for d in docs]
 
     return _call_sync_with_timeout(
@@ -371,8 +385,10 @@ def _run_evaluation_body(
         generated_answer: Optional[str] = "" if not needs_generation else None
         try:
             # 3a. 检索
-            if vector_store and needs_retrieval:
-                retrieved_contexts = _retrieve(tc.query, vector_store, top_k)
+            if vector_store and needs_retrieval and task.knowledge_base_id is not None:
+                retrieved_contexts = _retrieve(
+                    tc.query, vector_store, top_k, db, task.knowledge_base_id
+                )
 
             # 3b. 生成（retrieval 类型跳过）
             if needs_generation:

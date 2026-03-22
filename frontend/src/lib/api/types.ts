@@ -44,6 +44,8 @@ export interface KnowledgeBase {
   id: number;
   name: string;
   description: string | null;
+  /** 新文档入库时使用父子分块（父块仅库表，子块入向量） */
+  parent_child_chunking: boolean;
   user_id: number;
   created_at: string;
   updated_at: string;
@@ -104,6 +106,29 @@ export interface Citation {
   index: number;
   page_content: string;
   metadata: Record<string, unknown>;
+}
+
+/** 与后端 RagPipelineOptions 对齐（POST /api/chat/{id}/messages） */
+export interface RagPipelineOptions {
+  top_k: number;
+  query_rewrite: boolean;
+  multi_kb: boolean;
+  hybrid: boolean;
+  multi_route: boolean;
+  rerank: boolean;
+  parent_child: boolean;
+  rerank_top_n?: number | null;
+  hybrid_vector_weight: number;
+}
+
+/** GET /api/knowledge-base/{kb_id}/chunks/{chunk_id} */
+export interface ChunkDetail {
+  id: string;
+  kb_id: number;
+  document_id: number;
+  file_name: string;
+  chunk_metadata: Record<string, unknown> | null;
+  document_file_path: string | null;
 }
 
 export interface ChatMessage {

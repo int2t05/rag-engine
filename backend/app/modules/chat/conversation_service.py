@@ -69,9 +69,9 @@ def get_chat(db: Session, user_id: int, chat_id: int) -> Chat:
 
 def get_stream_context(
     db: Session, user_id: int, chat_id: int, body: StreamMessagesRequest
-) -> Tuple[Chat, List[int], Dict[str, Any]]:
+) -> Tuple[Chat, List[int], Dict[str, Any], Any]:
     """
-    校验消息体并返回对话、知识库 ID 列表、供 generate_response 使用的 messages 字典。
+    校验消息体并返回对话、知识库 ID 列表、供 generate_response 使用的 messages 字典、rag_options。
     """
     chat = ChatRepository(db).get_with_knowledge_bases(chat_id, user_id)
     if not chat:
@@ -85,7 +85,7 @@ def get_stream_context(
     messages_dict = {
         "messages": [{"role": m.role, "content": m.content} for m in body.messages]
     }
-    return chat, kb_ids, messages_dict
+    return chat, kb_ids, messages_dict, body.rag_options
 
 
 def delete_chat(db: Session, user_id: int, chat_id: int) -> None:

@@ -1,22 +1,17 @@
 """
 RAG 对话服务（核心）
 ===================
-实现完整的 RAG 流程：历史感知检索 → 上下文构建 → LLM 流式生成 → 引用格式化返回。
-
-LangChain 1.x 重构说明：
-- 旧版 create_history_aware_retriever / create_retrieval_chain / create_stuff_documents_chain
-  已在 langchain 1.x 中移除，全面改用 LCEL（LangChain Expression Language）
-- 历史感知检索：通过 LLM 重写问题 + retriever 实现
-- RAG 链：通过 { | prompt | llm } LCEL 管道构建
+Native 路径：单次向量检索 → 上下文构建 → LLM 流式生成 → Base64 引用载荷。
+可选能力由 `RagOrchestrator` 按前端 `rag_options` 串联（与 LangChain RAG 教程中
+检索前/后处理一致：查询变换、多查询、混合检索、重排、父子块展开等）。
 
 流程概览：
 1. 保存用户消息和占位 AI 消息到数据库
-2. 为每个知识库创建向量存储，构建检索器
-3. 使用 LLM 根据对话历史重写问题（历史感知检索）
-4. 用重写后的问题检索相关文档片段
-5. 将检索结果作为上下文，构建 QA 提示词，要求 LLM 用 [citation:N] 引用
-6. 流式返回：先返回 Base64 编码的引用上下文，再逐块返回 LLM 回答
-7. 将完整回答写回 AI 消息的 content
+2. 为每个有文档的知识库创建向量存储
+3. 构建 RagContext，执行模块化检索流水线（默认等价于纯向量 top_k）
+4. 将检索结果作为上下文，构建 QA 提示词，要求 LLM 用 [citation:N] 引用
+5. 流式返回：先返回 Base64 编码的引用上下文，再逐块返回 LLM 回答
+6. 将完整回答写回 AI 消息的 content
 """
 
 import json
@@ -39,7 +34,9 @@ from app.models.knowledge import KnowledgeBase, Document
 from app.shared.vector_store import VectorStoreFactory
 from app.shared.embedding.embedding_factory import EmbeddingsFactory
 from app.shared.llm.llm_factory import LLMFactory
-from app.shared.rag_dedupe import dedupe_retrieved_documents
+from app.schemas.rag_pipeline import RagPipelineOptions
+from app.modules.chat.rag.context import RagContext
+from app.modules.chat.rag.orchestrator import RagOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -143,22 +140,13 @@ async def generate_response(
     chat_id: int,
     db: Session,
     client_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
+    rag_options: Optional[RagPipelineOptions] = None,
 ) -> AsyncGenerator[str, None]:
     """
     生成 RAG 流式回答
 
-    参数：
-        query: 用户当前问题
-        messages: 完整对话历史
-        knowledge_base_ids: 此对话关联的知识库 ID 列表
-        chat_id: 对话 ID
-        db: 数据库会话
-
-    yield: 符合 Vercel AI SDK 协议的 SSE 文本块 流式传输
-
-    client_disconnected:
-        可选协程，返回 True 表示客户端已断开（刷新、关闭页、前端 Abort）。
-        用于停止生成并落库占位/已生成片段，避免长时间占用资源。
+    rag_options:
+        未传或 None 时使用默认 Native：top_k=4、无查询重写、仅首个有向量数据的库。
     """
 
     async def _client_gone() -> bool:
@@ -171,6 +159,7 @@ async def generate_response(
             return False
 
     stream_finished_ok = False
+    opts = rag_options or RagPipelineOptions()
 
     try:
         # 1. 持久化用户消息和占位 AI 消息
@@ -182,7 +171,7 @@ async def generate_response(
         db.add(bot_message)
         db.commit()
 
-        # 2. 加载知识库和向量存储
+        # 2. 加载知识库和向量存储（仅包含有已入库文档的库）
         knowledge_bases = (
             db.query(KnowledgeBase)
             .filter(KnowledgeBase.id.in_(knowledge_base_ids))
@@ -191,9 +180,9 @@ async def generate_response(
 
         embeddings = EmbeddingsFactory.create()
 
-        vector_stores = []
+        kb_ids_for_store: List[int] = []
+        vector_stores: List[Any] = []
         for kb in knowledge_bases:
-            # 在已有文档的知识库范围内做向量检索
             documents = (
                 db.query(Document).filter(Document.knowledge_base_id == kb.id).all()
             )
@@ -203,6 +192,7 @@ async def generate_response(
                     embedding_function=embeddings,
                 )
                 logger.debug("集合 %s 文档数: %d", f"kb_{kb.id}", vector_store.count())
+                kb_ids_for_store.append(kb.id)
                 vector_stores.append(vector_store)
 
         if not vector_stores:
@@ -214,35 +204,10 @@ async def generate_response(
             stream_finished_ok = True
             return
 
-        # 3. 使用第一个知识库的检索器
-        # TODO：可扩展为多库合并
-        retriever = vector_stores[0].as_retriever()
         llm = LLMFactory.create()
 
-        # 4. 构建 LCEL 链
-        #    问题重写链：根据对话历史将问题改写为独立问题(查询重写)
-        contextualize_q_prompt = ChatPromptTemplate.from_messages(
-            [
-                # “系统”，“给定聊天历史和最新的用户问题”，“可能引用聊天历史中的上下文”，“制定一个可以理解的独立问题”，“没有聊天历史”。不要回答问题，只要“如果需要，重新制定它，否则就原样返回。”
-                (
-                    "system",
-                    "Given a chat history and the latest user question "
-                    "which might reference context in the chat history, "
-                    "formulate a standalone question which can be understood "
-                    "without the chat history. Do NOT answer the question, just "
-                    "reformulate it if needed and otherwise return it as is.",
-                ),
-                MessagesPlaceholder("chat_history"),
-                ("human", "{input}"),
-            ]
-        )
-
-        # 历史感知问题重写链（LCEL）
-        history_aware_rewrite = contextualize_q_prompt | llm | StrOutputParser()
-
-        # 5. QA 提示词（要求使用 [citation:N] 引用格式）
         qa_prompt = ChatPromptTemplate.from_messages(
-            [  # “系统”、“给你一个用户问题，请写出清晰、简洁、准确的答案。”“你会得到一组与问题相关的上下文，它们从1开始顺序编号。””“每个上下文都有一个基于其在数组中的位置的隐式引用号（第一个上下文是1，第二个是2，等等）。”“请使用这些上下文，并在每个句子的末尾使用[citation:x]格式引用它们。”“你的答案必须是正确、准确的，并且是由专家用公正和专业的语气写的。“请限制为1024个令牌。”不要给出任何与问题无关的信息，也不要重复。“如果给定的上下文没有提供足够的信息，就说‘information is missing on’，后面跟着相关的主题。”“如果一个句子引用了多个上下文，请列出所有适用的引用，如[引文：1][引文：2]。””“除了代码和特定的名称和引用之外，你的答案必须用与问题相同的语言书写。”“简明扼要。\n\n{context}\n\n“ ”记住：引用上下文的位置号（1代表第一个上下文，2代表第二个，等等），不要盲目地“ ”逐字重复上下文。"
+            [
                 (
                     "system",
                     "You are given a user question, and please write clean, concise and accurate answer to the question. "
@@ -263,10 +228,8 @@ async def generate_response(
             ]
         )
 
-        # 6. 对「最终 QA」使用 LCEL
         answer_chain = qa_prompt | llm | StrOutputParser()
 
-        # 7. 构建 chat_history 供 LangChain 使用
         chat_history = []
         for message in messages["messages"]:
             if message["role"] == "user":
@@ -278,35 +241,28 @@ async def generate_response(
                     ]
                 chat_history.append(AIMessage(content=message["content"]))
 
-        # 8. 历史感知：用重写后的问句做检索；回答仍针对用户本轮原话 question=query
-        if await _client_gone():
-            bot_message.content = _STOPPED_ONLY  # type: ignore
-            db.commit()
-            yield "data: [DONE]\n"
-            return
-        # 将对话历史融入查询，生成独立可懂的问句
-        standalone_q = await history_aware_rewrite.ainvoke(
-            {"input": query, "chat_history": chat_history}
-        )
         if await _client_gone():
             bot_message.content = _STOPPED_ONLY  # type: ignore
             db.commit()
             yield "data: [DONE]\n"
             return
 
-        retrieved_docs = await retriever.ainvoke(standalone_q)
-        retrieved_docs = dedupe_retrieved_documents(retrieved_docs)
-        logger.info(
-            "RAG 检索: knowledge_base_ids=%s 去重后片段数=%d",
-            knowledge_base_ids,
-            len(retrieved_docs),
+        # 3. 模块化检索（Native + 可选：重写 / 多路 / 多库 / 混合 / 父子 / 重排）
+        ctx = RagContext(
+            query=query,
+            messages=messages,
+            chat_history=chat_history,
+            knowledge_base_ids=knowledge_base_ids,
+            db=db,
+            knowledge_bases=knowledge_bases,
+            kb_ids_for_store=kb_ids_for_store,
+            vector_stores=vector_stores,
+            options=opts,
         )
-
-        # TODO: Rerank
+        await RagOrchestrator.run_retrieval_pipeline(ctx)
+        retrieved_docs = ctx.retrieved_docs
 
         full_response = ""
-        # 始终下发引用块（含空列表），便于前端展示「参考来源」并与首包仅含 Base64 时的状态更新一致
-        # Base64 编码后作为纯 ASCII 字符串传递更安全。
         base64_context = base64.b64encode(
             _serialize_context(retrieved_docs).encode()
         ).decode()
@@ -320,7 +276,6 @@ async def generate_response(
         yield f"data: {json.dumps({'text': base64_context + separator}, ensure_ascii=False)}\n"
         full_response += base64_context + separator
 
-        # 9. 流式生成（只对 answer_chain astream，避免并行 dict 流式问题）
         async for chunk in answer_chain.astream(
             {
                 "context": _format_docs(retrieved_docs),
@@ -328,7 +283,6 @@ async def generate_response(
                 "chat_history": chat_history,
             }
         ):
-            # 每次循环检查客户端是否已断开，节省 Token
             if await _client_gone():
                 if full_response.strip():
                     bot_message.content = full_response + _CANCELLED_SUFFIX  # type: ignore
@@ -351,7 +305,6 @@ async def generate_response(
                 db.commit()
                 raise
 
-        # 10. 更新数据库中的 AI 消息
         bot_message.content = full_response  # type: ignore
         db.commit()
         stream_finished_ok = True

@@ -56,6 +56,7 @@
 | GET | `/{kb_id}/documents/{doc_id}` | 文档详情 |
 | DELETE | `/{kb_id}/documents/{doc_id}` | 删除单篇文档 |
 | POST | `/{kb_id}/documents/batch-delete` | 批量删除文档 |
+| GET | `/{kb_id}/chunks/{chunk_id}` | 单条分块详情（引用跳转；校验知识库归属） |
 | POST | `/test-retrieval` | 控制台检索测试（body 含 `kb_id`、`query` 等） |
 
 ## 对话模块 `/api/chat`
@@ -67,7 +68,7 @@
 | POST | `/batch-delete` | 批量删除对话 |
 | GET | `/{chat_id}` | 对话详情 |
 | DELETE | `/{chat_id}` | 删除对话 |
-| POST | `/{chat_id}/messages` | 发送消息，**SSE** 流式 RAG 回答 |
+| POST | `/{chat_id}/messages` | 发送消息，**SSE** 流式 RAG 回答；body：`messages`（完整历史，末条为用户）+ 可选 `rag_options`（`RagPipelineOptions`：top_k、query_rewrite、multi_kb、hybrid、multi_route、rerank、parent_child 等，见 `app/schemas/rag_pipeline.py`） |
 
 （消息历史由前端在创建对话/发消息后通过既有数据结构维护；当前无独立「仅拉取消息列表」的 GET 路由。）
 

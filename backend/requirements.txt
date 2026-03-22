@@ -37,6 +37,10 @@ langchain-openai==1.1.11
 chromadb==1.5.5
 langchain-chroma==1.1.0
 
+# ===== RAG 检索增强（混合 BM25 + 重排，可选）=====
+rank-bm25==0.2.2
+flashrank==0.2.10
+
 # ===== LLM Providers =====
 openai==2.29.0
 langchain-ollama==1.0.1

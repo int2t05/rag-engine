@@ -3,6 +3,8 @@
  * @see backend/app/schemas/knowledge.py、document_processor.py、schemas/evaluation.py
  */
 
+import type { RagPipelineOptions } from "@/lib/api/types";
+
 export const DEFAULT_CHUNK_SIZE = 1000;
 export const DEFAULT_CHUNK_OVERLAP = 200;
 
@@ -64,4 +66,25 @@ export function parseTopK(input: string): number {
   const n = Number(t);
   if (!Number.isFinite(n)) return DEFAULT_TOP_K;
   return Math.min(50, Math.max(1, Math.floor(n)));
+}
+
+/** 与后端 RagPipelineOptions 默认一致（全关 = Native 向量检索） */
+export const DEFAULT_RAG_OPTIONS: RagPipelineOptions = {
+  top_k: 4,
+  query_rewrite: false,
+  multi_kb: false,
+  hybrid: false,
+  multi_route: false,
+  rerank: false,
+  parent_child: false,
+  hybrid_vector_weight: 0.5,
+};
+
+/** 对话 RAG top_k：1～100，与后端 schema 上限一致 */
+export function parseChatRagTopK(input: string): number {
+  const t = input.trim();
+  if (t === "") return DEFAULT_RAG_OPTIONS.top_k;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return DEFAULT_RAG_OPTIONS.top_k;
+  return Math.min(100, Math.max(1, Math.floor(n)));
 }

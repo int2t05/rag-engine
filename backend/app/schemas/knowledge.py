@@ -3,7 +3,7 @@
 =======================
 """
 
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 from datetime import datetime
 from pydantic import BaseModel
 
@@ -13,6 +13,8 @@ class KnowledgeBaseBase(BaseModel):
 
     name: str
     description: Optional[str] = None
+    #: 新文档入库时采用父子分块（父块仅 MySQL，子块向量化）；对话侧仍需勾选「父子块展开」
+    parent_child_chunking: bool = False
 
 
 class KnowledgeBaseCreate(KnowledgeBaseBase):
@@ -155,3 +157,14 @@ class BatchDeleteDocumentsRequest(BaseModel):
     """批量删除文档请求体"""
 
     document_ids: List[int]
+
+
+class ChunkDetailResponse(BaseModel):
+    """引用详情：单条分块及所属文档信息（对话内跳转用）。"""
+
+    id: str
+    kb_id: int
+    document_id: int
+    file_name: str
+    chunk_metadata: Optional[Dict[str, Any]] = None
+    document_file_path: Optional[str] = None

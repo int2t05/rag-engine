@@ -11,6 +11,7 @@ export { Citations } from "./Citations";
 export { MessageBubble } from "./MessageBubble";
 export { LoadingDots } from "./LoadingDots";
 export { NewChatModal } from "./NewChatModal";
+export { RagOptionsBar } from "./RagOptionsBar";
 
 // 类型定义（集中放置以避免模块解析问题）
 export interface KbOption {

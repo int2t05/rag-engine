@@ -9,9 +9,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { chatApi, knowledgeBaseApi, ApiError, type Chat, type ChatMessage, type Citation } from "@/lib/api";
+import {
+  chatApi,
+  knowledgeBaseApi,
+  ApiError,
+  type Chat,
+  type ChatMessage,
+  type Citation,
+  type RagPipelineOptions,
+} from "@/lib/api";
 import { parseFastApiErrorBody } from "@/lib/api-errors";
-import { DEFAULT_CHAT_TITLE_PREFIX } from "@/lib/form-defaults";
+import {
+  DEFAULT_CHAT_TITLE_PREFIX,
+  DEFAULT_RAG_OPTIONS,
+  parseChatRagTopK,
+} from "@/lib/form-defaults";
 import { parseCitationsFromContent, sseDataPayload } from "@/lib/chat-stream";
 import { citationsFromRagContextBase64 } from "@/lib/rag-context";
 import type { EnrichedMessage, KbOption } from "@/components/chat";
@@ -59,6 +71,11 @@ export function useChatSession() {
     show: false,
   });
   const [loading, setLoading] = useState(true);
+  const [ragOptions, setRagOptions] = useState<RagPipelineOptions>(() => ({
+    ...DEFAULT_RAG_OPTIONS,
+  }));
+  const [ragPanelOpen, setRagPanelOpen] = useState(false);
+  const [topKInput, setTopKInput] = useState(() => String(DEFAULT_RAG_OPTIONS.top_k));
 
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -319,7 +336,16 @@ export function useChatSession() {
         ...prevMessages.map((m) => ({ role: m.role, content: m.content })),
         { role: "user", content: userMsg.content },
       ];
-      const response = await chatApi.sendMessage(currentChat.id, allMessages, signal);
+      const ragPayload: RagPipelineOptions = {
+        ...ragOptions,
+        top_k: parseChatRagTopK(topKInput),
+      };
+      const response = await chatApi.sendMessage(
+        currentChat.id,
+        allMessages,
+        signal,
+        ragPayload,
+      );
 
       if (response.status === 401) {
         if (typeof window !== "undefined") {
@@ -437,7 +463,7 @@ export function useChatSession() {
       setStreaming(false);
       inputRef.current?.focus();
     }
-  }, [input, currentChat, sending, messages, showToast]);
+  }, [input, currentChat, sending, messages, showToast, ragOptions, topKInput]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -502,5 +528,11 @@ export function useChatSession() {
     handleKeyDown,
     handleNewChat,
     closeNewChatModal,
+    ragOptions,
+    setRagOptions,
+    ragPanelOpen,
+    setRagPanelOpen,
+    topKInput,
+    setTopKInput,
   };
 }

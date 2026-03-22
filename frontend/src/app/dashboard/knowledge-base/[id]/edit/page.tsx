@@ -18,6 +18,7 @@ export default function EditKnowledgeBasePage() {
   const [name, setName] = useState("");
   /** 知识库描述 */
   const [description, setDescription] = useState("");
+  const [parentChildChunking, setParentChildChunking] = useState(false);
   /** 错误信息 */
   const [error, setError] = useState("");
   /** 提交状态 */
@@ -40,6 +41,7 @@ export default function EditKnowledgeBasePage() {
         const data = await knowledgeBaseApi.get(Number(id));
         setName(data.name);
         setDescription(data.description || "");
+        setParentChildChunking(Boolean(data.parent_child_chunking));
       } catch (err) {
         setError(err instanceof ApiError ? err.message : "获取知识库信息失败");
       } finally {
@@ -68,6 +70,7 @@ export default function EditKnowledgeBasePage() {
       await knowledgeBaseApi.update(Number(id), {
         name: name.trim(),
         description: description.trim() || null,
+        parent_child_chunking: parentChildChunking,
       });
       router.push(PATH.knowledgeBaseDetail(id));
     } catch (err) {
@@ -119,6 +122,22 @@ export default function EditKnowledgeBasePage() {
             maxLength={255}
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
+        </div>
+
+        <div className="flex items-start gap-2 rounded-lg border border-gray-100 bg-gray-50/80 p-3">
+          <input
+            id="kb-pc-edit"
+            type="checkbox"
+            checked={parentChildChunking}
+            onChange={(e) => setParentChildChunking(e.target.checked)}
+            className="mt-0.5 rounded border-gray-300"
+          />
+          <label htmlFor="kb-pc-edit" className="text-sm text-gray-700">
+            <span className="font-medium">父子分块入库</span>
+            <span className="mt-0.5 block text-xs text-gray-500">
+              仅影响此后新处理/替换入库的文档；对话中需勾选「父子块展开」检索策略。
+            </span>
+          </label>
         </div>
 
         {/* 描述 */}
