@@ -27,6 +27,7 @@ from app.schemas.ai_runtime import AiRuntimeSettings
 from app.schemas.knowledge import DocumentResponse, PreviewRequest
 from app.shared.ai_runtime_loader import AiRuntimeNotConfigured
 from app.shared.ai_runtime_scope import ai_runtime_scope
+from app.db.session import SessionLocal
 from app.modules.knowledge.document_processor import (
     PreviewResult,
     preview_document,
@@ -133,6 +134,73 @@ async def replace_kb_document(
     }
 
 
+async def process_document_replace_background(
+    task_id: int,
+    kb_id: int,
+    user_id: int,
+    data: dict,
+) -> None:
+    """
+    首次上传流程中的「同名覆盖」：内容已写入 MinIO 永久路径，
+    仅执行 process_document 增量向量化并回写 Document 元数据。
+    """
+    db = SessionLocal()
+    try:
+        task = (
+            db.query(ProcessingTask).filter(ProcessingTask.id == task_id).first()
+        )
+        if not task:
+            logger.error("replace 任务不存在: task_id=%s", task_id)
+            return
+        task.status = "processing" # type: ignore
+        db.commit()
+
+        doc_id = data["document_id"]
+        document = db.query(Document).filter(Document.id == doc_id).first()
+        if not document:
+            raise RuntimeError("文档不存在")
+
+        await process_document(
+            document.file_path,
+            document.file_name,
+            kb_id,
+            doc_id,
+            user_id,
+        )
+
+        document = db.query(Document).filter(Document.id == doc_id).first()
+        if document:
+            document.file_hash = data["file_hash"]
+            document.file_size = data["file_size"]
+            document.content_type = data["content_type"]
+        task = (
+            db.query(ProcessingTask).filter(ProcessingTask.id == task_id).first()
+        )
+        if task:
+            task.status = "completed" # type: ignore
+            task.error_message = None # type: ignore
+        db.commit()
+    except Exception as e:
+        logger.error(
+            "replace 后台处理失败 task_id=%s: %s", task_id, e, exc_info=True
+        )
+        try:
+            task = (
+                db.query(ProcessingTask)
+                .filter(ProcessingTask.id == task_id)
+                .first()
+            )
+            if task:
+                task.status = "failed" # type: ignore
+                task.error_message = str(e) # type: ignore
+                db.commit()
+        except Exception:
+            db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def delete_document_core(
     db: Session,
     kb_id: int,
@@ -223,6 +291,43 @@ async def upload_kb_documents(
                 }
             )
             continue
+
+        # 同名不同内容：覆盖原永久路径，提交后走增量向量化（顶替同一 document_id）
+        existing_same_name = repo.find_document_by_filename_in_kb(
+            kb_id, file.filename or ""
+        )
+        if existing_same_name:
+            file_size = len(file_content)
+            ct = (
+                file.content_type
+                or existing_same_name.content_type
+                or "application/octet-stream"
+            )
+            try:
+                minio_client.put_object(
+                    bucket_name=settings.MINIO_BUCKET_NAME,
+                    object_name=existing_same_name.file_path,
+                    data=BytesIO(file_content),
+                    length=file_size,
+                    content_type=ct,
+                )
+            except MinioException as e:
+                logger.error("覆盖已存在文档失败：%s", e)
+                raise HTTPException(status_code=500, detail="上传文件失败") from e
+            results.append(
+                {
+                    "document_id": existing_same_name.id,
+                    "file_name": file.filename or "",
+                    "file_hash": file_hash,
+                    "file_size": file_size,
+                    "content_type": ct,
+                    "status": "pending_replace",
+                    "skip_processing": False,
+                    "replace": True,
+                }
+            )
+            continue
+
         # 2.上传到 MinIO（临时存储）
         temp_path = f"kb_{kb_id}/temp/{file.filename}"
         try:
@@ -331,60 +436,82 @@ def submit_document_processing(
         raise ResourceNotFoundError("未找到知识库")
 
     task_info: List[dict] = []
-    upload_ids: List[int] = []
+    ordered: List[tuple] = []
 
-    # 2. 过滤需要跳过的文档（已在 upload_kb_documents 中判定为「文件已存在」的项无需再次处理）
+    # 2. 过滤跳过项；保留顺序：新上传（DocumentUpload）与同名覆盖（replace）可混排
     for result in upload_results:
         if result.get("skip_processing"):
             continue
-        upload_ids.append(result["upload_id"])
+        if result.get("replace"):
+            ordered.append(("replace", result))
+        else:
+            uid = result.get("upload_id")
+            if uid is not None:
+                ordered.append(("upload", uid))
 
-    # 无待处理任务，直接返回空列表
-    if not upload_ids:
+    if not ordered:
         return {"tasks": []}
 
-    # 3. 批量查询 Upload 记录，组装成 dict 方便后续查找
-    uploads_dict = {u.id: u for u in repo.get_uploads_by_ids(upload_ids)}
+    upload_ids = [p for kind, p in ordered if kind == "upload"]
+    uploads_dict = (
+        {u.id: u for u in repo.get_uploads_by_ids(upload_ids)} if upload_ids else {}
+    )
 
-    # 4. 构造 ProcessingTask 列表（状态默认为 pending）
     all_tasks: List[ProcessingTask] = []
-    for upload_id in upload_ids:
-        upload = uploads_dict.get(upload_id)
-        if not upload:
-            continue
-        all_tasks.append(
-            ProcessingTask(
-                document_upload_id=upload_id,
-                knowledge_base_id=kb_id,
-                status="pending",
+    for kind, payload in ordered:
+        if kind == "upload":
+            upload = uploads_dict.get(payload)
+            if not upload:
+                raise ResourceNotFoundError(f"未找到上传记录 {payload}")
+            all_tasks.append(
+                ProcessingTask(
+                    document_upload_id=payload,
+                    knowledge_base_id=kb_id,
+                    status="pending",
+                )
             )
-        )
+        else:
+            all_tasks.append(
+                ProcessingTask(
+                    document_id=payload["document_id"],
+                    knowledge_base_id=kb_id,
+                    document_upload_id=None,
+                    status="pending",
+                )
+            )
 
-    # 5. 批量入库并 commit
     repo.add_processing_tasks(all_tasks)
     db.commit()
     for task in all_tasks:
         db.refresh(task)
 
-    # 6. 组装返回给前端的任务信息，同时准备后台任务所需的数据
     task_data: List[dict] = []
-    for i, upload_id in enumerate(upload_ids):
-        if i >= len(all_tasks):
-            break
+    for i, (kind, payload) in enumerate(ordered):
         task = all_tasks[i]
-        upload = uploads_dict.get(upload_id)
-
-        # 返回给前端的简洁映射
-        task_info.append({"upload_id": upload_id, "task_id": task.id})
-
-        # 传递给后台处理函数的完整数据（包含文件路径等信息）
-        if upload:
+        if kind == "upload":
+            upload = uploads_dict[payload]
+            task_info.append({"upload_id": payload, "task_id": task.id})
             task_data.append(
                 {
                     "task_id": task.id,
-                    "upload_id": upload_id,
+                    "replace": False,
                     "temp_path": upload.temp_path,
                     "file_name": upload.file_name,
+                }
+            )
+        else:
+            task_info.append(
+                {"document_id": payload["document_id"], "task_id": task.id}
+            )
+            task_data.append(
+                {
+                    "task_id": task.id,
+                    "replace": True,
+                    "document_id": payload["document_id"],
+                    "file_name": payload["file_name"],
+                    "file_hash": payload["file_hash"],
+                    "file_size": payload["file_size"],
+                    "content_type": payload["content_type"],
                 }
             )
 
@@ -412,18 +539,22 @@ async def add_processing_tasks_to_queue(
     # 使用 asyncio.gather 并发执行所有文档的向量化处理；
     # return_exceptions=True 使单个任务失败不影响其他任务，
     # 异常会被捕获进 results 列表而非直接抛出
-    results = await asyncio.gather(
-        *[
-            process_document_background(
-                data["temp_path"],  # MinIO 临时文件路径
-                data["file_name"],  # 文件名（用于日志和写回记录）
-                kb_id,  # 知识库 ID
-                data["task_id"],  # ProcessingTask 主键（用于更新状态）
-                None,  # chunk_size（None 表示使用默认配置）
-                user_id=user_id,  # 操作用户（用于权限校验）
+    async def _run_one(data: dict):
+        if data.get("replace"):
+            return await process_document_replace_background(
+                data["task_id"], kb_id, user_id, data
             )
-            for data in task_data
-        ],
+        return await process_document_background(
+            data["temp_path"],
+            data["file_name"],
+            kb_id,
+            data["task_id"],
+            None,
+            user_id=user_id,
+        )
+
+    results = await asyncio.gather(
+        *[_run_one(data) for data in task_data],
         return_exceptions=True,
     )
 
@@ -504,7 +635,9 @@ def get_processing_tasks_status(
             "error_message": task.error_message,
             "upload_id": task.document_upload_id,
             "file_name": (
-                task.document_upload.file_name if task.document_upload else None
+                task.document_upload.file_name
+                if task.document_upload
+                else (task.document.file_name if task.document else None)
             ),
         }
         for task in tasks

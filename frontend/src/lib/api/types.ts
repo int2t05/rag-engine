@@ -59,6 +59,11 @@ export interface UploadResult {
   status: string;
   message?: string;
   skip_processing: boolean;
+  /** 与同名已入库文档内容不同：将覆盖该文档并增量更新向量 */
+  replace?: boolean;
+  file_hash?: string;
+  file_size?: number;
+  content_type?: string;
 }
 
 /** POST .../documents/{docId}/replace 同名覆盖并增量更新向量 */

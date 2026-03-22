@@ -52,7 +52,14 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
     color: "border border-emerald-200/90 bg-emerald-50 text-emerald-950",
   },
   failed: { label: "失败", color: "border border-rose-200/90 bg-rose-50 text-rose-950" },
-  exists: { label: "已存在", color: "border border-border bg-surface-muted text-muted" },
+  exists: {
+    label: "内容相同",
+    color: "border border-border bg-surface-muted text-muted",
+  },
+  pending_replace: {
+    label: "待覆盖更新",
+    color: "border border-amber-200/90 bg-amber-50 text-amber-950",
+  },
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -346,6 +353,11 @@ export default function KnowledgeBaseDetailPage() {
               <p className="text-xs text-gray-400 mt-1">
                 支持 PDF、TXT、Markdown、DOCX 等格式
               </p>
+              <p className="text-xs text-gray-500 mt-3 max-w-lg mx-auto leading-relaxed">
+                去重规则：仅当与当前知识库中已有文档{" "}
+                <span className="text-gray-700 font-medium">文件名相同且内容完全一致</span>
+                时才会跳过上传；若仅同名但内容有变化，将覆盖原文档并增量更新向量。
+              </p>
             </>
           )}
           <input
@@ -364,13 +376,32 @@ export default function KnowledgeBaseDetailPage() {
             {uploadResults.map((r, i) => (
               <div
                 key={r.upload_id ?? r.document_id ?? `upload-${i}`}
-                className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg text-sm"
+                className="flex items-start justify-between gap-3 px-3 py-2.5 bg-gray-50 rounded-lg text-sm"
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  <FileIcon className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  <span className="text-gray-700 truncate">{r.file_name}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <FileIcon className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
+                    <span className="text-gray-800 font-medium truncate">{r.file_name}</span>
+                  </div>
+                  {r.status === "exists" && (
+                    <p className="text-xs text-gray-500 mt-1 pl-6 leading-relaxed">
+                      与库内已有文档相比，文件名与内容均完全一致，故跳过重复上传与处理。
+                    </p>
+                  )}
+                  {r.status === "pending_replace" && (
+                    <p className="text-xs text-amber-900/80 mt-1 pl-6 leading-relaxed">
+                      文件名与库内文档相同但内容已变化；点击「处理」后将覆盖原文档并增量更新向量。
+                    </p>
+                  )}
+                  {r.status === "pending" && (
+                    <p className="text-xs text-gray-500 mt-1 pl-6 leading-relaxed">
+                      新文件，提交处理后将写入知识库。
+                    </p>
+                  )}
                 </div>
-                <StatusBadge status={r.status} />
+                <div className="flex-shrink-0 pt-0.5">
+                  <StatusBadge status={r.status} />
+                </div>
               </div>
             ))}
 
@@ -458,7 +489,9 @@ export default function KnowledgeBaseDetailPage() {
                     </div>
                     {Object.entries(previewData).map(([docId, preview]) => {
                       const uploadResult = uploadResults.find(
-                        (r) => r.upload_id === Number(docId),
+                        (r) =>
+                          r.upload_id === Number(docId) ||
+                          r.document_id === Number(docId),
                       );
                       const fileName =
                         uploadResult?.file_name || `文档 #${docId}`;

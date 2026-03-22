@@ -65,7 +65,17 @@ export function useDocumentPipeline(
         Array.from(files).forEach((f) => formData.append("files", f));
         const results = await knowledgeBaseApi.uploadDocuments(kbId, formData);
         setUploadResults(results);
-        showToast(`已上传 ${results.length} 个文件`, "success");
+        const skipped = results.filter((r) => r.skip_processing).length;
+        const todo = results.filter((r) => !r.skip_processing).length;
+        let msg = `已收到 ${results.length} 个文件`;
+        if (skipped && todo) {
+          msg += `：${todo} 个待处理，${skipped} 个与库内已有文档内容完全相同已跳过`;
+        } else if (skipped) {
+          msg += `：均为与库内已有文档内容完全相同，已跳过重复处理`;
+        } else if (todo) {
+          msg += `，请预览或提交处理`;
+        }
+        showToast(msg, "success");
       } catch (err) {
         showToast(err instanceof ApiError ? err.message : "上传失败", "error");
       } finally {
@@ -95,8 +105,8 @@ export function useDocumentPipeline(
   const handlePreview = useCallback(async () => {
     const docIds = uploadResults
       .filter((r) => !r.skip_processing)
-      .map((r) => r.upload_id)
-      .filter((uid): uid is number => uid !== undefined);
+      .map((r) => r.upload_id ?? r.document_id)
+      .filter((id): id is number => id !== undefined);
 
     if (!docIds.length) return;
 

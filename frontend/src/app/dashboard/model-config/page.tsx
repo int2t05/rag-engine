@@ -1,32 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   llmConfigApi,
   AiRuntimeSettings,
   LlmEmbeddingConfigItem,
   ApiError,
 } from "@/lib/api";
+import {
+  defaultAiRuntimeSettings,
+  importModelConfigFromJson,
+  MODEL_CONFIG_JSON_EXAMPLE,
+} from "@/lib/model-config-import";
 import { Toast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { PlusIcon, TrashIcon, EditIcon } from "@/components/icons";
-
-function defaultConfig(): AiRuntimeSettings {
-  return {
-    embeddings_provider: "openai",
-    chat_provider: "openai",
-    openai_api_base: "https://api.openai.com/v1",
-    openai_api_key: "",
-    openai_model: "gpt-4",
-    openai_embeddings_model: "text-embedding-ada-002",
-    openai_embeddings_api_base: "",
-    openai_embeddings_api_key: "",
-    ollama_api_base: "http://localhost:11434",
-    ollama_embeddings_api_base: "",
-    ollama_model: "deepseek-r1:7b",
-    ollama_embeddings_model: "nomic-embed-text",
-  };
-}
 
 export default function ModelConfigPage() {
   const [items, setItems] = useState<LlmEmbeddingConfigItem[]>([]);
@@ -34,7 +22,9 @@ export default function ModelConfigPage() {
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<LlmEmbeddingConfigItem | "new" | null>(null);
   const [formName, setFormName] = useState("");
-  const [formConfig, setFormConfig] = useState<AiRuntimeSettings>(defaultConfig);
+  const [formConfig, setFormConfig] = useState<AiRuntimeSettings>(() =>
+    defaultAiRuntimeSettings(),
+  );
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState({
     msg: "",
@@ -42,6 +32,7 @@ export default function ModelConfigPage() {
     visible: false,
   });
   const [confirmDel, setConfirmDel] = useState<LlmEmbeddingConfigItem | null>(null);
+  const jsonFileRef = useRef<HTMLInputElement>(null);
 
   const showToast = useCallback((msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type, visible: true });
@@ -66,7 +57,7 @@ export default function ModelConfigPage() {
   const startNew = () => {
     setEditing("new");
     setFormName("新配置");
-    setFormConfig(defaultConfig());
+    setFormConfig(defaultAiRuntimeSettings());
   };
 
   const startEdit = (row: LlmEmbeddingConfigItem) => {
@@ -109,6 +100,44 @@ export default function ModelConfigPage() {
       await load();
     } catch (e) {
       showToast(e instanceof ApiError ? e.message : "切换失败", "error");
+    }
+  };
+
+  const pickJsonFile = () => jsonFileRef.current?.click();
+
+  const onJsonFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const { name, config } = importModelConfigFromJson(text);
+      setFormConfig(config);
+      if (name) setFormName(name);
+      showToast("已从 JSON 填入配置", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "导入失败", "error");
+    }
+  };
+
+  const downloadExampleJson = () => {
+    const blob = new Blob([MODEL_CONFIG_JSON_EXAMPLE], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "model-config.example.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const copyExampleJson = async () => {
+    try {
+      await navigator.clipboard.writeText(MODEL_CONFIG_JSON_EXAMPLE);
+      showToast("已复制示例到剪贴板", "success");
+    } catch {
+      showToast("复制失败", "error");
     }
   };
 
@@ -231,6 +260,56 @@ export default function ModelConfigPage() {
           <h2 className="mb-4 font-medium text-ink">
             {editing === "new" ? "新建配置" : "编辑配置"}
           </h2>
+
+          <div className="mb-4 space-y-2 rounded-lg border border-dashed border-border bg-surface-muted/40 p-3">
+            <p className="text-xs leading-relaxed text-muted">
+              支持一键导入 JSON：推荐结构为{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono text-[11px] text-ink">
+                {`{ "name": "...", "config": { ... } }`}
+              </code>
+              ；也可只写 <code className="font-mono text-[11px]">config</code>{" "}
+              内字段，缺省项会与默认值合并。
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={jsonFileRef}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={onJsonFileChange}
+              />
+              <button
+                type="button"
+                onClick={pickJsonFile}
+                className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-muted"
+              >
+                从 JSON 导入
+              </button>
+              <button
+                type="button"
+                onClick={downloadExampleJson}
+                className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-muted"
+              >
+                下载示例 JSON
+              </button>
+              <button
+                type="button"
+                onClick={() => void copyExampleJson()}
+                className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-muted"
+              >
+                复制示例
+              </button>
+            </div>
+            <details className="group text-xs">
+              <summary className="cursor-pointer select-none text-muted hover:text-ink">
+                展开查看示例 JSON 全文
+              </summary>
+              <pre className="mt-2 max-h-56 overflow-auto rounded-md border border-border bg-surface p-2 font-mono text-[11px] leading-relaxed text-ink">
+                {MODEL_CONFIG_JSON_EXAMPLE}
+              </pre>
+            </details>
+          </div>
+
           <div className="space-y-3">
             <label className="block text-sm">
               <span className="text-muted">配置名称</span>

@@ -87,6 +87,21 @@ class KnowledgeRepository:
             .first()
         )
 
+    def find_document_by_filename_in_kb(
+        self, kb_id: int, file_name: str
+    ) -> Optional[Document]:
+        """同库内按文件名查找已入库文档（表级唯一 uq_kb_file_name，至多一条）。"""
+        if not file_name:
+            return None
+        return (
+            self.db.query(Document)
+            .filter(
+                Document.knowledge_base_id == kb_id,
+                Document.file_name == file_name,
+            )
+            .first()
+        )
+
     def get_document_owned(
         self, kb_id: int, doc_id: int, user_id: int
     ) -> Optional[Document]:
@@ -221,7 +236,10 @@ class KnowledgeRepository:
             return []
         return (
             self.db.query(ProcessingTask)
-            .options(selectinload(ProcessingTask.document_upload))
+            .options(
+                selectinload(ProcessingTask.document_upload),
+                selectinload(ProcessingTask.document),
+            )
             .filter(
                 ProcessingTask.id.in_(task_ids),
                 ProcessingTask.knowledge_base_id == kb_id,

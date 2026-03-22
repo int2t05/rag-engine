@@ -58,10 +58,13 @@ export const knowledgeBaseApi = {
     api.post<Record<number, PreviewResult>>(`/api/knowledge-base/${kbId}/documents/preview`, data),
 
   processDocuments: (kbId: number, uploadResults: UploadResult[]) =>
-    api.post<{ tasks: { upload_id: number; task_id: number }[] }>(
-      `/api/knowledge-base/${kbId}/documents/process`,
-      uploadResults,
-    ),
+    api.post<{
+      tasks: {
+        task_id: number;
+        upload_id?: number;
+        document_id?: number;
+      }[];
+    }>(`/api/knowledge-base/${kbId}/documents/process`, uploadResults),
 
   getProcessingTasks: (kbId: number, taskIds: number[]) =>
     api.get<Record<string, TaskStatus>>(
