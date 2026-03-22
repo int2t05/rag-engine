@@ -10,10 +10,21 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { knowledgeBaseApi, ApiError, type PreviewResult, type TaskStatus, type UploadResult } from "@/lib/api";
+import {
+  knowledgeBaseApi,
+  ApiError,
+  type DocumentIngestChunkParams,
+  type PreviewResult,
+  type TaskStatus,
+  type UploadResult,
+} from "@/lib/api";
 import {
   parseChunkOverlap,
   parseChunkSize,
+  parseParentChunkSizeForIngest,
+  parseParentChunkOverlapForIngest,
+  parseChildChunkSizeForIngest,
+  parseChildChunkOverlapForIngest,
 } from "@/lib/form-defaults";
 
 export function useDocumentPipeline(
@@ -24,9 +35,16 @@ export function useDocumentPipeline(
     showToast: (msg: string, type?: "success" | "error" | "info") => void;
     /** 详情接口返回的队列任务 id，进入页面后自动轮询 */
     pendingUploadTaskIds: number[];
+    /** 知识库启用父子分块入库时，分别填写父块/子块大小与重叠 */
+    parentChildChunking?: boolean;
   },
 ) {
-  const { fetchKb, showToast, pendingUploadTaskIds } = options;
+  const {
+    fetchKb,
+    showToast,
+    pendingUploadTaskIds,
+    parentChildChunking = false,
+  } = options;
 
   const [uploading, setUploading] = useState(false);
   const [uploadResults, setUploadResults] = useState<UploadResult[]>([]);
@@ -39,6 +57,10 @@ export function useDocumentPipeline(
 
   const [chunkSizeInput, setChunkSizeInput] = useState("");
   const [chunkOverlapInput, setChunkOverlapInput] = useState("");
+  const [parentChunkSizeInput, setParentChunkSizeInput] = useState("");
+  const [parentChunkOverlapInput, setParentChunkOverlapInput] = useState("");
+  const [childChunkSizeInput, setChildChunkSizeInput] = useState("");
+  const [childChunkOverlapInput, setChildChunkOverlapInput] = useState("");
   const [previewing, setPreviewing] = useState(false);
   const [previewData, setPreviewData] = useState<Record<number, PreviewResult>>({});
   const [previewError, setPreviewError] = useState("");
@@ -102,6 +124,34 @@ export function useDocumentPipeline(
     [handleUpload],
   );
 
+  const getIngestChunkParams = useCallback((): DocumentIngestChunkParams => {
+    const cs = parseChunkSize(chunkSizeInput);
+    const co = parseChunkOverlap(chunkOverlapInput, cs);
+    if (!parentChildChunking) {
+      return { chunk_size: cs, chunk_overlap: co };
+    }
+    const ps = parseParentChunkSizeForIngest(parentChunkSizeInput);
+    const po = parseParentChunkOverlapForIngest(parentChunkOverlapInput, ps);
+    const csz = parseChildChunkSizeForIngest(childChunkSizeInput);
+    const coz = parseChildChunkOverlapForIngest(childChunkOverlapInput, csz);
+    return {
+      chunk_size: cs,
+      chunk_overlap: co,
+      parent_chunk_size: ps,
+      parent_chunk_overlap: po,
+      child_chunk_size: csz,
+      child_chunk_overlap: coz,
+    };
+  }, [
+    parentChildChunking,
+    chunkSizeInput,
+    chunkOverlapInput,
+    parentChunkSizeInput,
+    parentChunkOverlapInput,
+    childChunkSizeInput,
+    childChunkOverlapInput,
+  ]);
+
   const handlePreview = useCallback(async () => {
     const docIds = uploadResults
       .filter((r) => !r.skip_processing)
@@ -113,13 +163,11 @@ export function useDocumentPipeline(
     setPreviewing(true);
     setPreviewError("");
     setPreviewData({});
-    const cs = parseChunkSize(chunkSizeInput);
-    const co = parseChunkOverlap(chunkOverlapInput, cs);
+    const chunk = getIngestChunkParams();
     try {
       const data = await knowledgeBaseApi.previewDocuments(kbId, {
         document_ids: docIds,
-        chunk_size: cs,
-        chunk_overlap: co,
+        ...chunk,
       });
       setPreviewData(data);
       setShowPreview(true);
@@ -128,7 +176,7 @@ export function useDocumentPipeline(
     } finally {
       setPreviewing(false);
     }
-  }, [kbId, uploadResults, chunkSizeInput, chunkOverlapInput]);
+  }, [kbId, uploadResults, getIngestChunkParams]);
 
   const handleProcess = useCallback(async () => {
     const toProcess = uploadResults.filter((r) => !r.skip_processing);
@@ -136,7 +184,11 @@ export function useDocumentPipeline(
 
     setProcessing(true);
     try {
-      const res = await knowledgeBaseApi.processDocuments(kbId, uploadResults);
+      const chunk = getIngestChunkParams();
+      const res = await knowledgeBaseApi.processDocuments(kbId, {
+        upload_results: uploadResults,
+        ...chunk,
+      });
       const tasks = res.tasks;
       if (tasks.length > 0) {
         setPollingTaskIds(tasks.map((t) => t.task_id));
@@ -149,7 +201,7 @@ export function useDocumentPipeline(
     } finally {
       setProcessing(false);
     }
-  }, [kbId, uploadResults, fetchKb, showToast]);
+  }, [kbId, uploadResults, fetchKb, showToast, getIngestChunkParams]);
 
   useEffect(() => {
     if (pollingTaskIds.length === 0) {
@@ -209,6 +261,14 @@ export function useDocumentPipeline(
     setChunkSizeInput,
     chunkOverlapInput,
     setChunkOverlapInput,
+    parentChunkSizeInput,
+    setParentChunkSizeInput,
+    parentChunkOverlapInput,
+    setParentChunkOverlapInput,
+    childChunkSizeInput,
+    setChildChunkSizeInput,
+    childChunkOverlapInput,
+    setChildChunkOverlapInput,
     previewing,
     previewData,
     previewError,

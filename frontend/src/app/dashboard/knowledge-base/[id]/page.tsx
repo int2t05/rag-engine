@@ -32,8 +32,12 @@ import {
   isDocumentProcessing,
 } from "@/lib/utils";
 import {
+  DEFAULT_CHILD_CHUNK_OVERLAP,
+  DEFAULT_CHILD_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CHUNK_SIZE,
+  DEFAULT_PARENT_CHUNK_OVERLAP,
+  DEFAULT_PARENT_CHUNK_SIZE,
   DEFAULT_TOP_K,
   parseTopK,
 } from "@/lib/form-defaults";
@@ -191,6 +195,14 @@ export default function KnowledgeBaseDetailPage() {
     setChunkSizeInput,
     chunkOverlapInput,
     setChunkOverlapInput,
+    parentChunkSizeInput,
+    setParentChunkSizeInput,
+    parentChunkOverlapInput,
+    setParentChunkOverlapInput,
+    childChunkSizeInput,
+    setChildChunkSizeInput,
+    childChunkOverlapInput,
+    setChildChunkOverlapInput,
     previewing,
     previewData,
     previewError,
@@ -206,6 +218,7 @@ export default function KnowledgeBaseDetailPage() {
     fetchKb,
     showToast,
     pendingUploadTaskIds,
+    parentChildChunking: kb?.parent_child_chunking ?? false,
   });
 
   const handleCleanup = async () => {
@@ -415,17 +428,31 @@ export default function KnowledgeBaseDetailPage() {
                 <div className="mt-3 p-3 bg-surface-muted rounded-xl space-y-3">
                   <div>
                     <h4 className="text-xs font-medium text-muted tracking-wide">
-                      分块参数（仅影响预览）
+                      分块参数（预览与入库一致）
                     </h4>
                     <p className="text-[11px] text-muted mt-1 leading-relaxed">
-                      不填则采用系统默认：块大小 {DEFAULT_CHUNK_SIZE} 字符、重叠{" "}
-                      {DEFAULT_CHUNK_OVERLAP} 字符（与向量化处理默认一致）。实际入库处理由服务端配置决定。
+                      {kb.parent_child_chunking ? (
+                        <>
+                          本知识库为{" "}
+                          <span className="font-medium text-ink">父子分块</span>
+                          ：请分别设置父块与子块的大小与重叠；留空则采用与系统默认推导一致的占位（父{" "}
+                          {DEFAULT_PARENT_CHUNK_SIZE}/{DEFAULT_PARENT_CHUNK_OVERLAP}，子{" "}
+                          {DEFAULT_CHILD_CHUNK_SIZE}/{DEFAULT_CHILD_CHUNK_OVERLAP}）。顶部两项为接口校验用的基准块大小与重叠，可保持默认。
+                        </>
+                      ) : (
+                        <>
+                          不填则采用系统默认：块大小 {DEFAULT_CHUNK_SIZE} 字符、重叠{" "}
+                          {DEFAULT_CHUNK_OVERLAP} 字符（与向量化处理默认一致）。
+                        </>
+                      )}
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs text-muted mb-1">
-                        每块最大字符数
+                        {kb.parent_child_chunking
+                          ? "基准：每块最大字符数"
+                          : "每块最大字符数"}
                       </label>
                       <input
                         type="text"
@@ -440,7 +467,9 @@ export default function KnowledgeBaseDetailPage() {
                     </div>
                     <div>
                       <label className="block text-xs text-muted mb-1">
-                        块之间重叠字符数
+                        {kb.parent_child_chunking
+                          ? "基准：块之间重叠字符数"
+                          : "块之间重叠字符数"}
                       </label>
                       <input
                         type="text"
@@ -454,6 +483,88 @@ export default function KnowledgeBaseDetailPage() {
                       />
                     </div>
                   </div>
+                  {kb.parent_child_chunking && (
+                    <>
+                      <p className="text-[11px] text-muted font-medium text-ink">
+                        父块（写入库表，不向量化）
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-muted mb-1">
+                            父块最大字符数
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={parentChunkSizeInput}
+                            onChange={(e) =>
+                              setParentChunkSizeInput(
+                                e.target.value.replace(/\D/g, ""),
+                              )
+                            }
+                            placeholder={`默认 ${DEFAULT_PARENT_CHUNK_SIZE}`}
+                            className="w-full border border-border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-muted mb-1">
+                            父块重叠字符数
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={parentChunkOverlapInput}
+                            onChange={(e) =>
+                              setParentChunkOverlapInput(
+                                e.target.value.replace(/\D/g, ""),
+                              )
+                            }
+                            placeholder={`默认 ${DEFAULT_PARENT_CHUNK_OVERLAP}`}
+                            className="w-full border border-border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-muted font-medium text-ink pt-1">
+                        子块（写入向量库）
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-muted mb-1">
+                            子块最大字符数
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={childChunkSizeInput}
+                            onChange={(e) =>
+                              setChildChunkSizeInput(
+                                e.target.value.replace(/\D/g, ""),
+                              )
+                            }
+                            placeholder={`默认 ${DEFAULT_CHILD_CHUNK_SIZE}`}
+                            className="w-full border border-border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-muted mb-1">
+                            子块重叠字符数
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={childChunkOverlapInput}
+                            onChange={(e) =>
+                              setChildChunkOverlapInput(
+                                e.target.value.replace(/\D/g, ""),
+                              )
+                            }
+                            placeholder={`默认 ${DEFAULT_CHILD_CHUNK_OVERLAP}`}
+                            className="w-full border border-border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="mt-2 flex gap-2">

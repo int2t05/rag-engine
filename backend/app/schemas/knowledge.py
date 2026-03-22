@@ -144,8 +144,25 @@ class PreviewRequest(BaseModel):
     """文档分块预览的请求体"""
 
     document_ids: List[int]  # 要预览的文档（或上传记录）ID
-    chunk_size: int = 1000  # 每个块的最大字符数
+    chunk_size: int = 1000  # 每个块的最大字符数（非父子分块时；父子时亦用于未显式指定父/子时的推导）
     chunk_overlap: int = 200  # 块之间的重叠字符数，保持上下文连贯
+    #: 父子分块入库时可选；若四者均提供则直接使用；否则按 chunk_size/chunk_overlap 推导父/子 splitter
+    parent_chunk_size: Optional[int] = None
+    parent_chunk_overlap: Optional[int] = None
+    child_chunk_size: Optional[int] = None
+    child_chunk_overlap: Optional[int] = None
+
+
+class ProcessDocumentsRequest(BaseModel):
+    """提交文档处理（入库）的请求体：上传结果 + 分块参数（与预览一致）"""
+
+    upload_results: List[Dict[str, Any]]
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
+    parent_chunk_size: Optional[int] = None
+    parent_chunk_overlap: Optional[int] = None
+    child_chunk_size: Optional[int] = None
+    child_chunk_overlap: Optional[int] = None
 
 
 class TestRetrievalRequest(BaseModel):
@@ -171,3 +188,9 @@ class ChunkDetailResponse(BaseModel):
     file_name: str
     chunk_metadata: Optional[Dict[str, Any]] = None
     document_file_path: Optional[str] = None
+    #: 知识库是否启用父子分块入库
+    parent_child_chunking: bool = False
+    #: 本块为子块时，父块 id（来自 metadata）
+    parent_chunk_id: Optional[str] = None
+    #: 父块全文（子块且库中存在父块记录时填充）
+    parent_page_content: Optional[str] = None

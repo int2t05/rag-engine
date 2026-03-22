@@ -9,17 +9,152 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, List
+from typing import Any, Dict, List, Optional
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
+from sqlalchemy.orm import Session
+
 from app.models.knowledge import DocumentChunk
 from app.modules.chat.rag.context import RagContext
 from app.modules.chat.rag.retrieval_core import retrieve_for_context, truncate_to_top_k
+from app.shared.rag_dedupe import dedupe_retrieved_documents
 from app.shared.llm.llm_factory import LLMFactory
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_chunk_id(val: Any) -> Optional[str]:
+    if val is None:
+        return None
+    s = str(val).strip()
+    return s or None
+
+
+def _coerce_kb_doc_ids(md: Dict[str, Any]) -> Optional[tuple[int, int]]:
+    """从检索 metadata 解析 kb_id、document_id；失败则返回 None。"""
+    try:
+        kb = md.get("kb_id")
+        doc = md.get("document_id")
+        if kb is None or doc is None:
+            return None
+        return int(kb), int(doc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _enrich_chunk_id_and_parent_from_db(db: Session, doc: Any) -> None:
+    """Chroma 可能缺 chunk_id：用 kb_id+document_id+正文在库表对齐子块行并补全 chunk_id。"""
+    md = dict(getattr(doc, "metadata", None) or {})
+    pc = (getattr(doc, "page_content", None) or "").strip()
+    if not pc:
+        return
+    ids = _coerce_kb_doc_ids(md)
+    if ids is None:
+        return
+    kb_i, doc_i = ids
+    rows = (
+        db.query(DocumentChunk)
+        .filter(DocumentChunk.kb_id == kb_i, DocumentChunk.document_id == doc_i)
+        .all()
+    )
+    has_cid = _normalize_chunk_id(md.get("chunk_id")) or _normalize_chunk_id(
+        md.get("chunkId")
+    )
+    fallback = None
+    for r in rows:
+        cm = dict(r.chunk_metadata or {})  # type: ignore
+        if (cm.get("page_content") or "").strip() != pc:
+            continue
+        has_p = cm.get("parent_chunk_id") is not None and str(
+            cm.get("parent_chunk_id", "") # type: ignore
+        ).strip()
+        if has_p:
+            if not has_cid:
+                md["chunk_id"] = str(r.id)
+            doc.metadata = md
+            return
+        if fallback is None:
+            fallback = r
+    if fallback is not None and not has_cid:
+        md["chunk_id"] = str(fallback.id)
+        doc.metadata = md
+
+
+def _resolve_parent_chunk_id(db: Session, md: Dict[str, Any]) -> Optional[str]:
+    """
+    解析父块主键 id（64 位 hex）。
+    若存在子块 `chunk_id`，以库表子块行的 `parent_chunk_id` 为准；否则回退 metadata。
+    """
+    cid = _normalize_chunk_id(md.get("chunk_id")) or _normalize_chunk_id(
+        md.get("chunkId")
+    )
+    kb_doc = _coerce_kb_doc_ids(md)
+    if cid:
+        q = db.query(DocumentChunk).filter(DocumentChunk.id == cid)
+        if kb_doc:
+            q = q.filter(DocumentChunk.kb_id == kb_doc[0])
+        row = q.first()
+        if row and row.chunk_metadata:
+            cm = dict(row.chunk_metadata)  # type: ignore
+            p = cm.get("parent_chunk_id")
+            if p is not None and str(p).strip():
+                return str(p).strip()
+    raw = md.get("parent_chunk_id") or md.get("parentChunkId")
+    if raw is not None and str(raw).strip():
+        return str(raw).strip()
+    return None
+
+
+def _find_parent_row_by_containment(
+    db: Session,
+    kb_id: int,
+    document_id: int,
+    child_text: str,
+) -> Optional[DocumentChunk]:
+    """子块 metadata 里的父 id 在库中缺失时：找含子块正文的最短父块行（入库时子必为父的子串）。"""
+    ct = (child_text or "").strip()
+    if not ct:
+        return None
+    rows = (
+        db.query(DocumentChunk)
+        .filter(
+            DocumentChunk.kb_id == kb_id,
+            DocumentChunk.document_id == document_id,
+        )
+        .all()
+    )
+    best: Optional[tuple[int, DocumentChunk]] = None
+    for r in rows:
+        cm = dict(r.chunk_metadata or {})  # type: ignore
+        if not cm.get("is_parent"):
+            continue
+        pt = (cm.get("page_content") or "").strip()
+        if not pt or ct not in pt: # type: ignore
+            continue
+        ln = len(pt)
+        if best is None or ln < best[0]:
+            best = (ln, r)
+    return best[1] if best else None
+
+
+def _load_parent_chunk_row(
+    db: Session,
+    pid: str,
+    md: Dict[str, Any],
+    child_text: str,
+) -> Optional[DocumentChunk]:
+    kb_doc = _coerce_kb_doc_ids(md)
+    q = db.query(DocumentChunk).filter(DocumentChunk.id == pid)
+    if kb_doc:
+        q = q.filter(DocumentChunk.kb_id == kb_doc[0])
+    row = q.first()
+    if row:
+        return row
+    if not kb_doc:
+        return None
+    return _find_parent_row_by_containment(db, kb_doc[0], kb_doc[1], child_text)
 
 
 async def apply_query_rewrite(ctx: RagContext) -> None:
@@ -117,19 +252,42 @@ def apply_parent_child_expand(ctx: RagContext) -> None:
     if not ctx.options.parent_child:
         return
     for doc in ctx.retrieved_docs:
+        _enrich_chunk_id_and_parent_from_db(ctx.db, doc)
         md = dict(getattr(doc, "metadata", None) or {})
-        pid = md.get("parent_chunk_id")
+        pid = _resolve_parent_chunk_id(ctx.db, md)
         if not pid:
             continue
-        row = ctx.db.query(DocumentChunk).filter(DocumentChunk.id == str(pid)).first()
-        if row and row.chunk_metadata:
+        child_body = getattr(doc, "page_content", "") or ""
+        row = _load_parent_chunk_row(ctx.db, pid, md, child_body)
+        if not row:
+            logger.warning(
+                "parent_child 展开失败：未找到父块 id=%s（子块 chunk_id=%s）",
+                pid[:20] + ("…" if len(pid) > 20 else ""),
+                md.get("chunk_id"),
+            )
+            continue
+        if row.chunk_metadata:
             meta = dict(row.chunk_metadata)  # type: ignore
             text = meta.get("page_content") or ""
             if text:
                 doc.page_content = text
                 md["expanded_from_child"] = True
-                md["parent_chunk_id"] = str(pid)
+                md["parent_chunk_id"] = str(row.id)
                 doc.metadata = md
+                if str(row.id) != pid:
+                    logger.debug(
+                        "parent_child 以正文包含关系回退到父块 id=%s（metadata 原指向 %s）",
+                        row.id,
+                        pid[:20] + ("…" if len(pid) > 20 else ""),
+                    )
+            else:
+                logger.warning(
+                    "parent_child 展开失败：父块 id=%s 的 chunk_metadata 无 page_content",
+                    pid[:20] + ("…" if len(pid) > 20 else ""),
+                )
+
+    # 展开后多条子块对应同一父块：合并为单条，避免参考来源重复
+    ctx.retrieved_docs = dedupe_retrieved_documents(ctx.retrieved_docs)
 
 
 def apply_rerank(ctx: RagContext) -> None:

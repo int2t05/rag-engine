@@ -7,10 +7,23 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { knowledgeBaseApi, DocumentItem, ApiError } from "@/lib/api";
+import {
+  knowledgeBaseApi,
+  DocumentItem,
+  ApiError,
+  type ReplaceDocumentChunkParams,
+} from "@/lib/api";
 import {
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CHUNK_SIZE,
+  DEFAULT_PARENT_CHUNK_OVERLAP,
+  DEFAULT_PARENT_CHUNK_SIZE,
+  DEFAULT_CHILD_CHUNK_OVERLAP,
+  DEFAULT_CHILD_CHUNK_SIZE,
+  parseChildChunkOverlapForIngest,
+  parseChildChunkSizeForIngest,
+  parseParentChunkOverlapForIngest,
+  parseParentChunkSizeForIngest,
   parseReplaceChunkOverlap,
   parseReplaceChunkSize,
 } from "@/lib/form-defaults";
@@ -106,6 +119,12 @@ export default function DocumentDetailPage() {
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const [replaceChunkSizeInput, setReplaceChunkSizeInput] = useState("");
   const [replaceChunkOverlapInput, setReplaceChunkOverlapInput] = useState("");
+  const [replaceParentChunkSizeInput, setReplaceParentChunkSizeInput] = useState("");
+  const [replaceParentChunkOverlapInput, setReplaceParentChunkOverlapInput] =
+    useState("");
+  const [replaceChildChunkSizeInput, setReplaceChildChunkSizeInput] = useState("");
+  const [replaceChildChunkOverlapInput, setReplaceChildChunkOverlapInput] =
+    useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [toast, setToast] = useState({
     msg: "",
@@ -173,11 +192,31 @@ export default function DocumentDetailPage() {
 
       setReplacing(true);
       try {
+        const chunkParams: ReplaceDocumentChunkParams = {
+          chunk_size: chunkSize,
+          chunk_overlap: chunkOverlap,
+        };
+        if (doc.parent_child_chunking) {
+          const ps = parseParentChunkSizeForIngest(replaceParentChunkSizeInput);
+          const po = parseParentChunkOverlapForIngest(
+            replaceParentChunkOverlapInput,
+            ps,
+          );
+          const cs = parseChildChunkSizeForIngest(replaceChildChunkSizeInput);
+          const co = parseChildChunkOverlapForIngest(
+            replaceChildChunkOverlapInput,
+            cs,
+          );
+          chunkParams.parent_chunk_size = ps;
+          chunkParams.parent_chunk_overlap = po;
+          chunkParams.child_chunk_size = cs;
+          chunkParams.child_chunk_overlap = co;
+        }
         await knowledgeBaseApi.replaceDocument(
           Number(kbId),
           Number(docId),
           file,
-          { chunk_size: chunkSize, chunk_overlap: chunkOverlap },
+          chunkParams,
         );
         showToastMsg("文档已更新并重新向量化", "success");
         await fetchDocument({ silent: true });
@@ -198,6 +237,10 @@ export default function DocumentDetailPage() {
       showToastMsg,
       replaceChunkSizeInput,
       replaceChunkOverlapInput,
+      replaceParentChunkSizeInput,
+      replaceParentChunkOverlapInput,
+      replaceChildChunkSizeInput,
+      replaceChildChunkOverlapInput,
     ],
   );
 
@@ -335,11 +378,19 @@ export default function DocumentDetailPage() {
           <p className="text-xs text-muted mb-3 leading-relaxed">
             点击「替换文件」并选择同名文件时生效。留空则使用默认：每块{" "}
             {DEFAULT_CHUNK_SIZE} 字符、重叠 {DEFAULT_CHUNK_OVERLAP} 字符。
+            {doc.parent_child_chunking && (
+              <>
+                {" "}
+                本知识库为父子分块：请再填写父块与子块的大小与重叠（与知识库上传页一致）。
+              </>
+            )}
           </p>
           <div className="grid grid-cols-2 gap-3 max-w-md">
             <div>
               <label className="block text-xs text-muted mb-1">
-                每块最大字符数
+                {doc.parent_child_chunking
+                  ? "基准：每块最大字符数"
+                  : "每块最大字符数"}
               </label>
               <input
                 type="text"
@@ -355,7 +406,9 @@ export default function DocumentDetailPage() {
             </div>
             <div>
               <label className="block text-xs text-muted mb-1">
-                块之间重叠字符数
+                {doc.parent_child_chunking
+                  ? "基准：块之间重叠字符数"
+                  : "块之间重叠字符数"}
               </label>
               <input
                 type="text"
@@ -370,6 +423,88 @@ export default function DocumentDetailPage() {
               />
             </div>
           </div>
+          {doc.parent_child_chunking && (
+            <div className="mt-4 space-y-3 max-w-md">
+              <p className="text-xs font-medium text-ink">父块（库表，不向量化）</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-muted mb-1">
+                    父块最大字符数
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={replaceParentChunkSizeInput}
+                    onChange={(e) =>
+                      setReplaceParentChunkSizeInput(
+                        e.target.value.replace(/\D/g, ""),
+                      )
+                    }
+                    placeholder={`默认 ${DEFAULT_PARENT_CHUNK_SIZE}`}
+                    disabled={replacing || deleting}
+                    className="w-full border border-border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent disabled:opacity-50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted mb-1">
+                    父块重叠字符数
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={replaceParentChunkOverlapInput}
+                    onChange={(e) =>
+                      setReplaceParentChunkOverlapInput(
+                        e.target.value.replace(/\D/g, ""),
+                      )
+                    }
+                    placeholder={`默认 ${DEFAULT_PARENT_CHUNK_OVERLAP}`}
+                    disabled={replacing || deleting}
+                    className="w-full border border-border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent disabled:opacity-50"
+                  />
+                </div>
+              </div>
+              <p className="text-xs font-medium text-ink pt-1">子块（向量库）</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-muted mb-1">
+                    子块最大字符数
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={replaceChildChunkSizeInput}
+                    onChange={(e) =>
+                      setReplaceChildChunkSizeInput(
+                        e.target.value.replace(/\D/g, ""),
+                      )
+                    }
+                    placeholder={`默认 ${DEFAULT_CHILD_CHUNK_SIZE}`}
+                    disabled={replacing || deleting}
+                    className="w-full border border-border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent disabled:opacity-50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted mb-1">
+                    子块重叠字符数
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={replaceChildChunkOverlapInput}
+                    onChange={(e) =>
+                      setReplaceChildChunkOverlapInput(
+                        e.target.value.replace(/\D/g, ""),
+                      )
+                    }
+                    placeholder={`默认 ${DEFAULT_CHILD_CHUNK_OVERLAP}`}
+                    disabled={replacing || deleting}
+                    className="w-full border border-border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent disabled:opacity-50"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 border-t border-border pt-5 mt-5">

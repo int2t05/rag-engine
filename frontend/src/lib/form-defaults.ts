@@ -8,6 +8,12 @@ import type { RagPipelineOptions } from "@/lib/api/types";
 export const DEFAULT_CHUNK_SIZE = 1000;
 export const DEFAULT_CHUNK_OVERLAP = 200;
 
+/** 父子分块入库：与后端由 1000/200 推导的默认父/子 splitter 一致（未填写输入时使用） */
+export const DEFAULT_PARENT_CHUNK_SIZE = 2000;
+export const DEFAULT_PARENT_CHUNK_OVERLAP = 200;
+export const DEFAULT_CHILD_CHUNK_SIZE = 500;
+export const DEFAULT_CHILD_CHUNK_OVERLAP = 80;
+
 /** 与后端 `replace` 路由 Query 上限一致（`routes_documents.replace_document_endpoint`） */
 export const REPLACE_CHUNK_PARAM_MAX = 500_000;
 
@@ -58,6 +64,56 @@ export function parseChunkOverlap(input: string, chunkSize: number): number {
   const n = Number(t);
   if (!Number.isFinite(n)) return Math.min(DEFAULT_CHUNK_OVERLAP, chunkSize);
   return Math.min(chunkSize, Math.max(0, Math.floor(n)));
+}
+
+/** 父子分块：父块大小（字符），空串为 DEFAULT_PARENT_CHUNK_SIZE */
+export function parseParentChunkSizeForIngest(input: string): number {
+  const t = input.trim();
+  if (t === "") return DEFAULT_PARENT_CHUNK_SIZE;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return DEFAULT_PARENT_CHUNK_SIZE;
+  return Math.min(10_000, Math.max(400, Math.floor(n)));
+}
+
+export function parseParentChunkOverlapForIngest(
+  input: string,
+  parentChunkSize: number,
+): number {
+  const t = input.trim();
+  const cap = Math.max(0, parentChunkSize - 1);
+  if (t === "") {
+    return Math.min(DEFAULT_PARENT_CHUNK_OVERLAP, cap);
+  }
+  const n = Number(t);
+  if (!Number.isFinite(n)) {
+    return Math.min(DEFAULT_PARENT_CHUNK_OVERLAP, cap);
+  }
+  return Math.min(cap, Math.max(0, Math.floor(n)));
+}
+
+/** 父子分块：子块大小（字符），空串为 DEFAULT_CHILD_CHUNK_SIZE */
+export function parseChildChunkSizeForIngest(input: string): number {
+  const t = input.trim();
+  if (t === "") return DEFAULT_CHILD_CHUNK_SIZE;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return DEFAULT_CHILD_CHUNK_SIZE;
+  return Math.min(10_000, Math.max(100, Math.floor(n)));
+}
+
+export function parseChildChunkOverlapForIngest(
+  input: string,
+  childChunkSize: number,
+): number {
+  const t = input.trim();
+  const cap = Math.max(0, childChunkSize - 1);
+  if (t === "") {
+    return Math.min(DEFAULT_CHILD_CHUNK_OVERLAP, cap);
+  }
+  const n = Number(t);
+  if (!Number.isFinite(n)) {
+    return Math.min(DEFAULT_CHILD_CHUNK_OVERLAP, cap);
+  }
+  return Math.min(cap, Math.max(0, Math.floor(n)));
 }
 
 export function parseTopK(input: string): number {

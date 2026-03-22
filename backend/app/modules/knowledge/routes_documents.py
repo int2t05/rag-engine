@@ -6,7 +6,7 @@
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import (
     APIRouter,
@@ -14,8 +14,10 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Request,
     UploadFile,
 )
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_active_ai_runtime
@@ -29,6 +31,7 @@ from app.schemas.knowledge import (
     ChunkDetailResponse,
     DocumentResponse,
     PreviewRequest,
+    ProcessDocumentsRequest,
     TestRetrievalRequest,
 )
 from app.modules.knowledge.document_processor import PreviewResult
@@ -82,12 +85,14 @@ async def preview_kb_documents_endpoint(
         )
     except ResourceNotFoundError as e:
         raise HTTPException(status_code=404, detail=e.detail) from e
+    except BadRequestError as e:
+        raise HTTPException(status_code=400, detail=e.detail) from e
 
 
 @router.post("/{kb_id}/documents/process")
 async def process_kb_documents_endpoint(
     kb_id: int,
-    upload_results: List[dict],
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -95,19 +100,37 @@ async def process_kb_documents_endpoint(
 ):
     """
     提交文档处理任务：创建 ProcessingTask 并由后台队列解析与向量化。
-    立即返回 task_id 列表供轮询。
+    立即返回 task_id 列表供轮询。分块参数与预览接口一致，保证入库与预览一致。
+
+    请求体可为对象（推荐）：`{ "upload_results": [...], "chunk_size", ... }`；
+    或兼容旧版仅发送上传结果数组 `[{ "upload_id": ... }, ...]`（此时分块默认 1000/200）。
     """
     try:
+        raw = await request.json()
+        if isinstance(raw, list):
+            body = ProcessDocumentsRequest(upload_results=raw)
+        else:
+            body = ProcessDocumentsRequest.model_validate(raw)
         return submit_document_processing(
             db,
             current_user.id,
             kb_id,
-            upload_results,
+            body.upload_results,
             background_tasks,
             _rt,
+            chunk_size=body.chunk_size,
+            chunk_overlap=body.chunk_overlap,
+            parent_chunk_size=body.parent_chunk_size,
+            parent_chunk_overlap=body.parent_chunk_overlap,
+            child_chunk_size=body.child_chunk_size,
+            child_chunk_overlap=body.child_chunk_overlap,
         )
     except ResourceNotFoundError as e:
         raise HTTPException(status_code=404, detail=e.detail) from e
+    except BadRequestError as e:
+        raise HTTPException(status_code=400, detail=e.detail) from e
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from e
 
 
 @router.post("/cleanup")
@@ -152,6 +175,30 @@ async def replace_document_endpoint(
         le=500_000,
         description="分块重叠字符数",
     ),
+    parent_chunk_size: int | None = Query(
+        None,
+        ge=1,
+        le=500_000,
+        description="父子分块：父块最大字符数（与另外三参同时省略则按 chunk 推导）",
+    ),
+    parent_chunk_overlap: int | None = Query(
+        None,
+        ge=0,
+        le=500_000,
+        description="父子分块：父块重叠字符数",
+    ),
+    child_chunk_size: int | None = Query(
+        None,
+        ge=1,
+        le=500_000,
+        description="父子分块：子块最大字符数",
+    ),
+    child_chunk_overlap: int | None = Query(
+        None,
+        ge=0,
+        le=500_000,
+        description="父子分块：子块重叠字符数",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _rt: AiRuntimeSettings = Depends(require_active_ai_runtime),
@@ -167,6 +214,10 @@ async def replace_document_endpoint(
             file,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            parent_chunk_size=parent_chunk_size,
+            parent_chunk_overlap=parent_chunk_overlap,
+            child_chunk_size=child_chunk_size,
+            child_chunk_overlap=child_chunk_overlap,
         )
     except ResourceNotFoundError as e:
         raise HTTPException(status_code=404, detail=e.detail) from e
@@ -237,7 +288,8 @@ def get_chunk_detail_endpoint(
 ) -> Any:
     """单条分块详情（引用跳转）；校验知识库归属。"""
     repo = KnowledgeRepository(db)
-    if repo.get_owned_kb(kb_id, current_user.id) is None:
+    kb_ent = repo.get_owned_kb(kb_id, current_user.id)
+    if kb_ent is None:
         raise HTTPException(status_code=404, detail=f"未找到知识库{kb_id}")
     chunk = (
         db.query(DocumentChunk)
@@ -256,6 +308,19 @@ def get_chunk_detail_endpoint(
             )
             .first()
         )
+    pc_kb = bool(kb_ent.parent_child_chunking)
+    meta = dict(chunk.chunk_metadata or {})
+    raw_pid = meta.get("parent_chunk_id")
+    pid = str(raw_pid).strip() if raw_pid is not None and str(raw_pid).strip() else None
+    parent_text: Optional[str] = None
+    if pid:
+        parent = (
+            db.query(DocumentChunk)
+            .filter(DocumentChunk.id == pid, DocumentChunk.kb_id == kb_id)
+            .first()
+        )
+        if parent and parent.chunk_metadata:
+            parent_text = dict(parent.chunk_metadata).get("page_content") or None
     return ChunkDetailResponse(
         id=chunk.id,
         kb_id=chunk.kb_id,
@@ -263,6 +328,9 @@ def get_chunk_detail_endpoint(
         file_name=chunk.file_name,
         chunk_metadata=chunk.chunk_metadata,
         document_file_path=doc_row.file_path if doc_row else None,
+        parent_child_chunking=pc_kb,
+        parent_chunk_id=pid,
+        parent_page_content=parent_text,
     )
 
 

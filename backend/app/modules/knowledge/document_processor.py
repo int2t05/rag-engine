@@ -87,9 +87,15 @@ def split_documents_for_kb_ingest(
     chunk_size: int,
     chunk_overlap: int,
     use_parent_child: bool,
+    parent_chunk_size: Optional[int] = None,
+    parent_chunk_overlap: Optional[int] = None,
+    child_chunk_size: Optional[int] = None,
+    child_chunk_overlap: Optional[int] = None,
 ) -> Tuple[List[LangchainDocument], List[Dict[str, Any]]]:
     """
     按知识库策略分块：普通递归分块，或父子分块（仅返回子块列表 + 父块元数据列表）。
+
+    父子分块时：若四个父/子参数均显式提供则直接使用；否则按 chunk_size/chunk_overlap 推导父/子 splitter（与旧版一致）。
     """
     # 1. 非父子分块模式：直接按指定大小切分
     if not use_parent_child:
@@ -99,20 +105,34 @@ def split_documents_for_kb_ingest(
         out = text_splitter.split_documents(documents)
         return out, []
     # 2. 父子分块模式：创建双层拆分器
+    pc_all = (
+        parent_chunk_size is not None
+        and parent_chunk_overlap is not None
+        and child_chunk_size is not None
+        and child_chunk_overlap is not None
+    )
+    if pc_all:
+        ps_sz = parent_chunk_size
+        ps_ov = parent_chunk_overlap
+        cs_sz = child_chunk_size
+        cs_ov = child_chunk_overlap
+    else:
+        ps_sz = max(chunk_size * 2, 1600)
+        ps_ov = min(chunk_overlap * 2, 200)
+        cs_sz = max(chunk_size // 2, 400)
+        cs_ov = min(chunk_overlap // 2, 80)
     parent_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=max(chunk_size * 2, 1600),
-        chunk_overlap=min(chunk_overlap * 2, 200),
+        chunk_size=ps_sz, chunk_overlap=ps_ov
     )
     child_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=max(chunk_size // 2, 400),
-        chunk_overlap=min(chunk_overlap // 2, 80),
+        chunk_size=cs_sz, chunk_overlap=cs_ov
     )
     child_docs: List[LangchainDocument] = []
     parent_rows_spec: List[Dict[str, Any]] = []
-    # 3. 对每个父块生成 ID 和元数据
-    for parent_doc in parent_splitter.split_documents(documents):
+    # 3. 对每个父块生成 ID 和元数据（序号纳入哈希，避免同文本父块主键冲突）
+    for p_idx, parent_doc in enumerate(parent_splitter.split_documents(documents)):
         parent_id = hashlib.sha256(
-            f"{kb_id}:{file_name}:parent:{parent_doc.page_content}".encode()
+            f"{kb_id}:{file_name}:parent:{p_idx}:{parent_doc.page_content}".encode()
         ).hexdigest()
         pm = dict(parent_doc.metadata)
         pm["source"] = file_name
@@ -136,6 +156,11 @@ async def process_document(
     user_id: int,
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
+    *,
+    parent_chunk_size: Optional[int] = None,
+    parent_chunk_overlap: Optional[int] = None,
+    child_chunk_size: Optional[int] = None,
+    child_chunk_overlap: Optional[int] = None,
 ) -> None:
     """
     处理文档并存储到向量数据库，支持增量更新。
@@ -167,6 +192,10 @@ async def process_document(
             chunk_overlap,
             kb_id=kb_id,
             use_parent_child=use_pc,
+            parent_chunk_size=parent_chunk_size,
+            parent_chunk_overlap=parent_chunk_overlap,
+            child_chunk_size=child_chunk_size,
+            child_chunk_overlap=child_chunk_overlap,
         )
 
         # 初始化 embeddings
@@ -216,10 +245,11 @@ async def process_document(
         new_chunks = []
         documents_to_update = []
 
-        for chunk in preview_result.chunks:
+        for i, chunk in enumerate(preview_result.chunks):
             # 与 _process_document_background_sync 一致：先算 chunk_id、再写 metadata、再算 hash
+            # 序号纳入 id，避免多块正文相同导致 document_chunks 主键冲突
             chunk_id = hashlib.sha256(
-                f"{kb_id}:{file_name}:{chunk.content}".encode()
+                f"{kb_id}:{file_name}:{i}:{chunk.content}".encode()
             ).hexdigest()
             meta = dict(chunk.metadata) if chunk.metadata else {}
             meta["source"] = file_name
@@ -333,6 +363,10 @@ async def preview_document(
     *,
     kb_id: int = 0,
     use_parent_child: bool = False,
+    parent_chunk_size: Optional[int] = None,
+    parent_chunk_overlap: Optional[int] = None,
+    child_chunk_size: Optional[int] = None,
+    child_chunk_overlap: Optional[int] = None,
 ) -> PreviewResult:
     """
     从 MinIO 下载文件，解析并分块，返回预览结果。
@@ -378,6 +412,10 @@ async def preview_document(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             use_parent_child=eff_pc,
+            parent_chunk_size=parent_chunk_size,
+            parent_chunk_overlap=parent_chunk_overlap,
+            child_chunk_size=child_chunk_size,
+            child_chunk_overlap=child_chunk_overlap,
         )
         preview_chunks = [
             TextChunk(content=c.page_content, metadata=dict(c.metadata or {}))
@@ -406,6 +444,10 @@ def _process_document_background_sync(
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
     user_id: Optional[int] = None,
+    parent_chunk_size: Optional[int] = None,
+    parent_chunk_overlap: Optional[int] = None,
+    child_chunk_size: Optional[int] = None,
+    child_chunk_overlap: Optional[int] = None,
 ) -> None:
     """
     后台文档处理主流程（同步实现，在线程池中运行）。
@@ -495,6 +537,10 @@ def _process_document_background_sync(
                 chunk_size=chunk_size,
                 chunk_overlap=chunk_overlap,
                 use_parent_child=use_pc,
+                parent_chunk_size=parent_chunk_size,
+                parent_chunk_overlap=parent_chunk_overlap,
+                child_chunk_size=child_chunk_size,
+                child_chunk_overlap=child_chunk_overlap,
             )
             if use_pc:
                 logger.info(
@@ -589,9 +635,9 @@ def _process_document_background_sync(
                 logger.info(f"任务 {task_id}：存储文档块")
                 vector_chunk_ids: List[str] = []
                 for i, chunk in enumerate(chunks):
-                    # 为每个 chunk 生成唯一的 ID
+                    # 为每个 chunk 生成唯一 ID（须含序号，否则同正文多块会主键冲突）
                     chunk_id = hashlib.sha256(
-                        f"{kb_id}:{file_name}:{chunk.page_content}".encode()
+                        f"{kb_id}:{file_name}:{i}:{chunk.page_content}".encode()
                     ).hexdigest()
                     vector_chunk_ids.append(chunk_id)
 
@@ -691,6 +737,11 @@ async def process_document_background(
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
     user_id: Optional[int] = None,
+    *,
+    parent_chunk_size: Optional[int] = None,
+    parent_chunk_overlap: Optional[int] = None,
+    child_chunk_size: Optional[int] = None,
+    child_chunk_overlap: Optional[int] = None,
 ) -> None:
     """在线程池中执行重 CPU/IO 的同步处理，避免阻塞 asyncio 事件循环。"""
     await asyncio.to_thread(
@@ -703,4 +754,8 @@ async def process_document_background(
         chunk_size,
         chunk_overlap,
         user_id,
+        parent_chunk_size,
+        parent_chunk_overlap,
+        child_chunk_size,
+        child_chunk_overlap,
     )

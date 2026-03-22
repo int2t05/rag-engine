@@ -71,6 +71,30 @@ Default API prefix: `/api` (`API_V1_STR`): `/auth`, `/knowledge-base`, `/chat`, 
 - [Architecture](docs/架构/后端项目架构说明.md)
 - [API routes](docs/架构/API路由.md) (Chinese, path reference)
 - [Business flows](docs/业务流程/00-业务流程总览与索引.md)
+- [Suggested dev roadmap](docs/总览/01%20开发路线.md) (Chinese)
+
+## TODO (repo-level)
+
+Actionable backlog items (track via issues/milestones).
+
+- [ ] **Tests & quality**: automated tests for backend services (knowledge pipeline, RAG, auth) and critical frontend flows; repeatable integration tests with local infra.
+- [ ] **CI**: run lint, type-check, and tests on push/PR; optional coverage.
+- [ ] **Production & security**: HTTPS, tighter CORS, API rate limits, secret rotation; backup/restore drills for MySQL, Chroma, and MinIO.
+- [ ] **Docs & contracts**: periodically align OpenAPI (`/docs`) with [docs/架构/API路由.md](docs/架构/API路由.md) and [frontend/docs](frontend/docs/README.md).
+
+## Future optimization
+
+Longer-term directions (not a committed roadmap).
+
+| Area | Notes |
+|------|--------|
+| **Retrieval & vectors** | Multi-store or collection strategy, cross-KB reranking/fusion, query caching, presets/A-B for `RagPipelineOptions`. |
+| **RAG & chat** | Multi-turn context compression, citation/context budgeting, default tuning for rewrite and multi-route retrieval. |
+| **Observability** | Structured logs, latency/token/retrieval metrics, optional OpenTelemetry. |
+| **Evaluation & data** | Versioned eval sets, regression comparisons, optional linkage to sampled production chats (where compliant). |
+| **Frontend & UX** | Performance (first paint, lists), streaming/error UX, a11y, optional i18n. |
+
+See [docs/总览/01 开发路线.md](docs/总览/01%20开发路线.md) for the suggested iteration order.
 
 ## License
 

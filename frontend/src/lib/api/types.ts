@@ -104,6 +104,34 @@ export interface PreviewResult {
   child_chunk_count?: number;
 }
 
+/** 与后端 PreviewRequest / ProcessDocumentsRequest 分块字段对齐 */
+export interface DocumentIngestChunkParams {
+  chunk_size: number;
+  chunk_overlap: number;
+  parent_chunk_size?: number | null;
+  parent_chunk_overlap?: number | null;
+  child_chunk_size?: number | null;
+  child_chunk_overlap?: number | null;
+}
+
+export interface PreviewDocumentsBody extends DocumentIngestChunkParams {
+  document_ids: number[];
+}
+
+export interface ProcessDocumentsBody extends DocumentIngestChunkParams {
+  upload_results: UploadResult[];
+}
+
+/** 替换文档 Query：必选常规块参数；父子知识库可再传父/子四元组 */
+export interface ReplaceDocumentChunkParams {
+  chunk_size: number;
+  chunk_overlap: number;
+  parent_chunk_size?: number;
+  parent_chunk_overlap?: number;
+  child_chunk_size?: number;
+  child_chunk_overlap?: number;
+}
+
 export interface RetrievalResult {
   content: string;
   metadata: Record<string, unknown>;
@@ -138,6 +166,9 @@ export interface ChunkDetail {
   file_name: string;
   chunk_metadata: Record<string, unknown> | null;
   document_file_path: string | null;
+  parent_child_chunking?: boolean;
+  parent_chunk_id?: string | null;
+  parent_page_content?: string | null;
 }
 
 export interface ChatMessage {

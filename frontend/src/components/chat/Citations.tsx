@@ -22,10 +22,15 @@ function chunkDetailHref(meta: Record<string, unknown>, chatId?: number): string
   if (!Number.isFinite(kbNum)) return null;
   if (cid === undefined || cid === null || cid === "") return null;
   const base = PATH.chunkDetail(kbNum, String(cid));
+  const q: string[] = [];
   if (chatId != null && Number.isFinite(chatId)) {
-    return `${base}?chat=${chatId}`;
+    q.push(`chat=${chatId}`);
   }
-  return base;
+  // 仅当该条引用在对话里已做父子展开时带 pc=1，分块详情页才展示父块
+  if (meta.expanded_from_child === true) {
+    q.push("pc=1");
+  }
+  return q.length ? `${base}?${q.join("&")}` : base;
 }
 
 /**

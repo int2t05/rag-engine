@@ -140,7 +140,8 @@ class DocumentChunk(Base, TimestampMixin):
     文档被切分后，每个块在此表记录一条。
     同时，块的内容会通过 Embedding 转为向量存入向量数据库。
 
-    id 使用 content 的哈希，方便做增量更新（相同内容的块可跳过）
+    id 由 kb、文件名、分块序号与正文等派生的哈希，保证同文档内唯一；
+    行级 hash 字段仍用于增量对比（内容+元数据）
     chunk_metadata 存储 JSON，包括 page_content 等 LangChain Document 的元数据
     """
     __tablename__ = "document_chunks"

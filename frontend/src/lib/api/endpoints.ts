@@ -24,6 +24,9 @@ import type {
   LlmEmbeddingConfigItem,
   LlmEmbeddingConfigListResponse,
   PreviewResult,
+  ProcessDocumentsBody,
+  PreviewDocumentsBody,
+  ReplaceDocumentChunkParams,
   ReplaceDocumentResult,
   ChunkDetail,
   RetrievalResult,
@@ -63,20 +66,17 @@ export const knowledgeBaseApi = {
   uploadDocuments: (kbId: number, files: FormData) =>
     api.post<UploadResult[]>(`/api/knowledge-base/${kbId}/documents/upload`, files),
 
-  previewDocuments: (
-    kbId: number,
-    data: { document_ids: number[]; chunk_size?: number; chunk_overlap?: number },
-  ) =>
+  previewDocuments: (kbId: number, data: PreviewDocumentsBody) =>
     api.post<Record<number, PreviewResult>>(`/api/knowledge-base/${kbId}/documents/preview`, data),
 
-  processDocuments: (kbId: number, uploadResults: UploadResult[]) =>
+  processDocuments: (kbId: number, body: ProcessDocumentsBody) =>
     api.post<{
       tasks: {
         task_id: number;
         upload_id?: number;
         document_id?: number;
       }[];
-    }>(`/api/knowledge-base/${kbId}/documents/process`, uploadResults),
+    }>(`/api/knowledge-base/${kbId}/documents/process`, body),
 
   getProcessingTasks: (kbId: number, taskIds: number[]) =>
     api.get<Record<string, TaskStatus>>(
@@ -102,7 +102,7 @@ export const knowledgeBaseApi = {
     kbId: number,
     docId: number,
     file: File,
-    chunkParams: { chunk_size: number; chunk_overlap: number },
+    chunkParams: ReplaceDocumentChunkParams,
   ) => {
     const form = new FormData();
     form.append("file", file);
@@ -110,6 +110,18 @@ export const knowledgeBaseApi = {
       chunk_size: String(chunkParams.chunk_size),
       chunk_overlap: String(chunkParams.chunk_overlap),
     });
+    const pc = chunkParams;
+    if (
+      pc.parent_chunk_size != null &&
+      pc.parent_chunk_overlap != null &&
+      pc.child_chunk_size != null &&
+      pc.child_chunk_overlap != null
+    ) {
+      q.set("parent_chunk_size", String(pc.parent_chunk_size));
+      q.set("parent_chunk_overlap", String(pc.parent_chunk_overlap));
+      q.set("child_chunk_size", String(pc.child_chunk_size));
+      q.set("child_chunk_overlap", String(pc.child_chunk_overlap));
+    }
     return api.post<ReplaceDocumentResult>(
       `/api/knowledge-base/${kbId}/documents/${docId}/replace?${q}`,
       form,

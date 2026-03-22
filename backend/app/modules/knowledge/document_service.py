@@ -12,7 +12,7 @@ import logging
 import os
 import time
 from io import BytesIO
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import BackgroundTasks, HTTPException, UploadFile
 from minio.error import MinioException
@@ -42,6 +42,39 @@ logger = logging.getLogger(__name__)
 BATCH_DELETE_DOCS_MAX = 100
 
 
+def _validate_split_params(
+    chunk_size: int,
+    chunk_overlap: int,
+    *,
+    parent_chunk_size: Optional[int] = None,
+    parent_chunk_overlap: Optional[int] = None,
+    child_chunk_size: Optional[int] = None,
+    child_chunk_overlap: Optional[int] = None,
+    use_parent_child: bool = False,
+) -> None:
+    """校验分块参数；父子分块时四元组须全有或全无，且每组 overlap < size。"""
+    if chunk_overlap >= chunk_size:
+        raise BadRequestError("chunk_overlap 必须小于 chunk_size")
+    group = (
+        parent_chunk_size,
+        parent_chunk_overlap,
+        child_chunk_size,
+        child_chunk_overlap,
+    )
+    if any(x is not None for x in group) and not all(x is not None for x in group):
+        raise BadRequestError(
+            "父子分块参数须同时提供 parent_chunk_size、parent_chunk_overlap、"
+            "child_chunk_size、child_chunk_overlap，或全部省略以按常规块大小推导父/子"
+        )
+    if use_parent_child and all(x is not None for x in group):
+        ps, po, cs, co = group
+        assert ps is not None and po is not None and cs is not None and co is not None
+        if po >= ps:
+            raise BadRequestError("parent_chunk_overlap 必须小于 parent_chunk_size")
+        if co >= cs:
+            raise BadRequestError("child_chunk_overlap 必须小于 child_chunk_size")
+
+
 def _upload_basename(filename: str | None) -> str:
     if not filename:
         return ""
@@ -57,12 +90,19 @@ async def replace_kb_document(
     *,
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
+    parent_chunk_size: Optional[int] = None,
+    parent_chunk_overlap: Optional[int] = None,
+    child_chunk_size: Optional[int] = None,
+    child_chunk_overlap: Optional[int] = None,
 ) -> dict:
     """
     覆盖已入库文档：上传文件名须与 document.file_name 一致；写入 MinIO 原路径后
     调用 process_document 做分块级增量更新。
     """
     repo = KnowledgeRepository(db)
+    kb_ent = repo.get_owned_kb(kb_id, user_id)
+    if not kb_ent:
+        raise ResourceNotFoundError("未找到知识库")
     document = repo.get_document_owned(kb_id, doc_id, user_id)
     if not document:
         raise ResourceNotFoundError("未找到文档")
@@ -70,8 +110,16 @@ async def replace_kb_document(
     incoming = _upload_basename(file.filename)
     if not incoming:
         raise BadRequestError("缺少文件名")
-    if chunk_overlap >= chunk_size:
-        raise BadRequestError("chunk_overlap 必须小于 chunk_size")
+    use_pc = bool(kb_ent.parent_child_chunking) or settings.RAG_PARENT_CHILD_INGEST
+    _validate_split_params(
+        chunk_size,
+        chunk_overlap,
+        parent_chunk_size=parent_chunk_size,
+        parent_chunk_overlap=parent_chunk_overlap,
+        child_chunk_size=child_chunk_size,
+        child_chunk_overlap=child_chunk_overlap,
+        use_parent_child=use_pc,
+    )
     if incoming != document.file_name:
         raise BadRequestError(
             f"文件名须与原文档一致（原文档：{document.file_name}，上传：{incoming}）"
@@ -104,6 +152,10 @@ async def replace_kb_document(
             user_id,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            parent_chunk_size=parent_chunk_size,
+            parent_chunk_overlap=parent_chunk_overlap,
+            child_chunk_size=child_chunk_size,
+            child_chunk_overlap=child_chunk_overlap,
         )
     except Exception as e:
         logger.error("replace_kb_document 处理失败: %s", e, exc_info=True)
@@ -166,6 +218,12 @@ async def process_document_replace_background(
             kb_id,
             doc_id,
             user_id,
+            chunk_size=data.get("chunk_size", 1000),
+            chunk_overlap=data.get("chunk_overlap", 200),
+            parent_chunk_size=data.get("parent_chunk_size"),
+            parent_chunk_overlap=data.get("parent_chunk_overlap"),
+            child_chunk_size=data.get("child_chunk_size"),
+            child_chunk_overlap=data.get("child_chunk_overlap"),
         )
 
         document = db.query(Document).filter(Document.id == doc_id).first()
@@ -378,7 +436,18 @@ async def preview_kb_documents(
     """按文档 ID 校验归属（含 kb_id）；document_ids 为空时直接返回空字典。"""
     repo = KnowledgeRepository(db)
     kb_ent = repo.get_owned_kb(kb_id, user_id)
-    use_pc = bool(kb_ent and kb_ent.parent_child_chunking) or settings.RAG_PARENT_CHILD_INGEST
+    if not kb_ent:
+        raise ResourceNotFoundError("未找到知识库")
+    use_pc = bool(kb_ent.parent_child_chunking) or settings.RAG_PARENT_CHILD_INGEST
+    _validate_split_params(
+        preview_request.chunk_size,
+        preview_request.chunk_overlap,
+        parent_chunk_size=preview_request.parent_chunk_size,
+        parent_chunk_overlap=preview_request.parent_chunk_overlap,
+        child_chunk_size=preview_request.child_chunk_size,
+        child_chunk_overlap=preview_request.child_chunk_overlap,
+        use_parent_child=use_pc,
+    )
     results: Dict[int, PreviewResult] = {}
     for doc_id in preview_request.document_ids:
         document = repo.get_document_owned(kb_id, doc_id, user_id)
@@ -396,6 +465,10 @@ async def preview_kb_documents(
             chunk_overlap=preview_request.chunk_overlap,
             kb_id=kb_id,
             use_parent_child=use_pc,
+            parent_chunk_size=preview_request.parent_chunk_size,
+            parent_chunk_overlap=preview_request.parent_chunk_overlap,
+            child_chunk_size=preview_request.child_chunk_size,
+            child_chunk_overlap=preview_request.child_chunk_overlap,
         )
         results[doc_id] = preview
 
@@ -409,6 +482,13 @@ def submit_document_processing(
     upload_results: List[dict],
     background_tasks: BackgroundTasks,
     _rt: AiRuntimeSettings,
+    *,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+    parent_chunk_size: Optional[int] = None,
+    parent_chunk_overlap: Optional[int] = None,
+    child_chunk_size: Optional[int] = None,
+    child_chunk_overlap: Optional[int] = None,
 ) -> dict:
     """
     提交流待处理文档进入向量处理队列。
@@ -436,8 +516,19 @@ def submit_document_processing(
 
     # 1. 权限校验：确保用户拥有该知识库
     repo = KnowledgeRepository(db)
-    if not repo.get_owned_kb(kb_id, user_id):
+    kb_ent = repo.get_owned_kb(kb_id, user_id)
+    if not kb_ent:
         raise ResourceNotFoundError("未找到知识库")
+    use_pc = bool(kb_ent.parent_child_chunking) or settings.RAG_PARENT_CHILD_INGEST
+    _validate_split_params(
+        chunk_size,
+        chunk_overlap,
+        parent_chunk_size=parent_chunk_size,
+        parent_chunk_overlap=parent_chunk_overlap,
+        child_chunk_size=child_chunk_size,
+        child_chunk_overlap=child_chunk_overlap,
+        use_parent_child=use_pc,
+    )
 
     task_info: List[dict] = []
     ordered: List[tuple] = []
@@ -519,6 +610,17 @@ def submit_document_processing(
                 }
             )
 
+    chunk_bundle = {
+        "chunk_size": chunk_size,
+        "chunk_overlap": chunk_overlap,
+        "parent_chunk_size": parent_chunk_size,
+        "parent_chunk_overlap": parent_chunk_overlap,
+        "child_chunk_size": child_chunk_size,
+        "child_chunk_overlap": child_chunk_overlap,
+    }
+    for td in task_data:
+        td.update(chunk_bundle)
+
     # 7. 注册后台任务：HTTP 响应返回后，并发执行各文档的向量化处理
     background_tasks.add_task(add_processing_tasks_to_queue, task_data, kb_id, user_id)
 
@@ -555,6 +657,12 @@ async def add_processing_tasks_to_queue(
             data["task_id"],
             None,
             user_id=user_id,
+            chunk_size=data.get("chunk_size", 1000),
+            chunk_overlap=data.get("chunk_overlap", 200),
+            parent_chunk_size=data.get("parent_chunk_size"),
+            parent_chunk_overlap=data.get("parent_chunk_overlap"),
+            child_chunk_size=data.get("child_chunk_size"),
+            child_chunk_overlap=data.get("child_chunk_overlap"),
         )
 
     results = await asyncio.gather(

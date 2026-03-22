@@ -10,3 +10,5 @@
 | [04-设计系统.md](./04-设计系统.md) | 色彩/字体 token、组件样式约定、与 globals 的关系 |
 
 与后端总览对照：仓库根目录 [docs/架构/技术架构.md](../../docs/架构/技术架构.md)、[docs/架构/API路由.md](../../docs/架构/API路由.md)（以后端代码为准时可查 `backend/app` 下各 `routes.py`）。
+
+项目级待办与后续优化方向见仓库根目录 [README.md](../../README.md)。
