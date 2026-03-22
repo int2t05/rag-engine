@@ -2,6 +2,22 @@
 
 A **FastAPI** + **LangChain 1.x (LCEL)** RAG stack: auth, knowledge bases, document ingestion, vector search, streaming chat, and optional RAG evaluation. The web UI uses **Next.js 14**.
 
+## Project highlights
+
+- **End-to-end flow**: auth → KBs, upload/parse/chunk/embed → retrieval + generation in chat → optional RAGAS evaluation; intended as a full-stack template you can extend.
+- **Multi-KB & streaming**: chats can bind multiple knowledge bases; answers stream over **SSE**, with citations linking to chunk/document detail pages.
+- **Model settings in the DB**: **LLM / embedding endpoints and secrets live per-user** (activate a config in-app), so you can target OpenAI-compatible APIs, Ollama, etc., without locking into one vendor.
+- **Optional evaluation**: RAGAS-based jobs and metrics, sharing **`RagPipelineOptions`** with chat so you can compare retrieval strategies fairly.
+- **Security & integration**: register/login with **JWT**; protected APIs expect **Bearer** tokens; **OpenAPI (Swagger)** and ReDoc at `/docs` for integration and client generation.
+
+## Technical highlights
+
+- **LCEL + configurable retrieval**: `RagPipelineOptions` toggles query rewrite, **multi-KB merge + dedupe**, **dense + BM25 hybrid (RRF)**, **multi-route retrieval**, **FlashRank reranking**, **parent→child expansion to parent text**, and more (default path is dense retrieval + `top_k` when features are off).
+- **Separated storage roles**: **MySQL** for users and business metadata; **Chroma** for vectors; **MinIO** for originals; the app coordinates keys across layers.
+- **Retrieval dedupe**: de-duplicates LangChain `Document`s by `chunk_id` / parent-chunk keys to reduce repeated citations from duplicate hits (see `backend/app/shared/rag_dedupe.py`).
+- **Types & contracts**: **Pydantic v2** for settings and schemas; **Alembic** migrations run during app startup via FastAPI **`lifespan`**.
+- **Client shape**: **REST** for resources and jobs, **SSE** for streaming chat tokens; **Next.js 14** (App Router) + Tailwind on the frontend, deployed separately from the API.
+
 ## Stack (official docs)
 
 | Layer | Tech | Docs |
