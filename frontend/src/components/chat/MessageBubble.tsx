@@ -5,7 +5,6 @@
 
 import { Markdown } from "@/components/Markdown";
 import { Citations } from "./Citations";
-import { RagProgressPanel } from "./RagProgressPanel";
 import type { EnrichedMessage } from "./types";
 
 interface MessageBubbleProps {
@@ -21,7 +20,7 @@ interface MessageBubbleProps {
  */
 export function MessageBubble({ message, chatId }: MessageBubbleProps) {
   const isUser = message.role === "user";
-  const assistantLoading =
+  const assistantWaitingPipeline =
     !isUser &&
     !String(message.content ?? "").trim() &&
     Boolean(message.ragPipeline?.length);
@@ -32,20 +31,16 @@ export function MessageBubble({ message, chatId }: MessageBubbleProps) {
         className={`max-w-[92%] md:max-w-2xl rounded-2xl px-4 py-3 ${
           isUser
             ? "bg-accent text-surface rounded-br-md"
-            : `border border-border bg-surface text-ink rounded-bl-md shadow-sm ${
-                assistantLoading ? "min-h-[8.5rem] w-full sm:min-w-[min(100%,20rem)]" : ""
-              }`
+            : "border border-border bg-surface text-ink rounded-bl-md shadow-sm"
         }`}
       >
-        {/* 消息内容 */}
+        {/* 消息内容；检索步骤在页面级 RagPipelineDialog 中展示 */}
         {isUser ? (
           <Markdown content={message.content} className="md-content-user" />
         ) : (
           <>
-            {message.ragPipeline && message.ragPipeline.length > 0 && (
-              <div className="mb-3">
-                <RagProgressPanel steps={message.ragPipeline} />
-              </div>
+            {assistantWaitingPipeline && (
+              <p className="text-sm text-muted">检索与向量化进行中，见下方进度面板…</p>
             )}
             {!message.content?.trim() &&
               (!message.ragPipeline || message.ragPipeline.length === 0) && (

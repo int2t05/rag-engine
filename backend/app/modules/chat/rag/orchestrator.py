@@ -31,17 +31,19 @@ class RagOrchestrator:
     ) -> AsyncIterator[Tuple[str, str]]:
         """
         按顺序执行可插拔流水线，并在每个阶段前 yield (step_id, 中文说明) 供 SSE 推送。
-        各步骤在对应开关关闭时内部可能为 no-op，但说明仍帮助用户理解整体流程。
+        仅在实际启用的模块前推送步骤，避免界面上出现未勾选能力对应的说明。
         """
         opts = ctx.options
         # 1) 检索前：独立问句（可选）
-        yield (
-            "query_preprocess",
-            "查询预处理（历史感知改写、多路准备）…",
-        )
+        if opts.query_rewrite:
+            yield (
+                "query_preprocess",
+                "查询预处理（历史感知改写、多路准备）…",
+            )
         await apply_query_rewrite(ctx)
         # 2) 检索前：多路子查询（可选）
-        yield ("multi_route", "多路子查询扩展与合并…")
+        if opts.multi_route:
+            yield ("multi_route", "多路子查询扩展与合并…")
         await apply_multi_route(ctx)
         if not ctx.retrieval_queries:
             ctx.retrieval_queries = [ctx.retrieval_query or ctx.query]
@@ -63,10 +65,12 @@ class RagOrchestrator:
         yield ("vector_retrieval", retrieval_label)
         run_dense_and_hybrid_retrieval(ctx)
         # 4) 检索后：父子块展开（可选）
-        yield ("parent_child", "父子文档块展开与对齐…")
+        if opts.parent_child:
+            yield ("parent_child", "父子文档块展开与对齐…")
         apply_parent_child_expand(ctx)
         # 5) 检索后：重排与截断至 top_k
-        yield ("rerank", "重排序与截断至 top_k…")
+        if opts.rerank:
+            yield ("rerank", "重排序与截断至 top_k…")
         apply_rerank(ctx)
         logger.info(
             "RAG 流水线完成: top_k=%s 片段数=%d 模块=%s",

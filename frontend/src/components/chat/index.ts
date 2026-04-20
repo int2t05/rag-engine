@@ -11,6 +11,7 @@ export { Citations } from "./Citations";
 export { MessageBubble } from "./MessageBubble";
 export { LoadingDots } from "./LoadingDots";
 export { RagProgressPanel } from "./RagProgressPanel";
+export { RagPipelineDialog, filterRagPipelineStepsByOptions } from "./RagPipelineDialog";
 export { NewChatModal } from "./NewChatModal";
 export { RagOptionsBar } from "./RagOptionsBar";
 

@@ -86,6 +86,8 @@ export function useChatSession() {
     ...DEFAULT_RAG_OPTIONS,
   }));
   const [ragPanelOpen, setRagPanelOpen] = useState(false);
+  /** 检索流水线对话框：发送后展开列表，首个正文 token 到达后折叠为紧凑条 */
+  const [ragPipelineDialogExpanded, setRagPipelineDialogExpanded] = useState(true);
   const [topKInput, setTopKInput] = useState(() => String(DEFAULT_RAG_OPTIONS.top_k));
   const [rerankTopNInput, setRerankTopNInput] = useState("");
 
@@ -113,6 +115,8 @@ export function useChatSession() {
   const streamVisibleLenRef = useRef(0);
   const sseReaderDoneRef = useRef(false);
   const displayTickerRef = useRef<number | null>(null);
+  /** 每个助手回复仅自动折叠一次；避免用户手动展开后被后续 token 再次压扁 */
+  const ragDialogAutoCollapsedRef = useRef(false);
 
   const stopStreamDisplayTicker = useCallback(() => {
     if (displayTickerRef.current != null) {
@@ -146,9 +150,9 @@ export function useChatSession() {
         const updated = [...prev];
         const last = updated[updated.length - 1];
         let ragPipeline = last.ragPipeline;
-        if (next > 0) {
+        if (streamComplete) {
           ragPipeline = undefined;
-        } else if (streamComplete && ragPipeline?.length) {
+        } else if (next > 0 && ragPipeline?.length) {
           ragPipeline = ragPipeline.map((s) => ({ ...s, done: true as const }));
         }
         updated[updated.length - 1] = {
@@ -449,6 +453,8 @@ export function useChatSession() {
     setMessages((prev) => [...prev, userMsg, assistantPlaceholder]);
     requestAnimationFrame(() => scrollMessagesToBottom());
     setInput("");
+    setRagPipelineDialogExpanded(true);
+    ragDialogAutoCollapsedRef.current = false;
     setSending(true);
     setStreaming(false);
 
@@ -552,6 +558,10 @@ export function useChatSession() {
 
           if (text) {
             streamBufferRef.current += text;
+            if (!ragDialogAutoCollapsedRef.current) {
+              ragDialogAutoCollapsedRef.current = true;
+              setRagPipelineDialogExpanded(false);
+            }
           }
         } catch {
           /* 非 JSON 行跳过 */
@@ -688,6 +698,8 @@ export function useChatSession() {
     setRagOptions,
     ragPanelOpen,
     setRagPanelOpen,
+    ragPipelineDialogExpanded,
+    setRagPipelineDialogExpanded,
     topKInput,
     setTopKInput,
     rerankTopNInput,
