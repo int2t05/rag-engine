@@ -35,6 +35,10 @@ import { parseCitationsFromContent, sseDataPayload } from "@/lib/chat-stream";
 import { citationsFromRagContextBase64 } from "@/lib/rag-context";
 import type { EnrichedMessage, KbOption } from "@/components/chat";
 
+/** SSE 累积缓冲与界面展示的速率（约 48 字/秒，可按产品调 TICK_MS / CPS） */
+const STREAM_DISPLAY_TICK_MS = 32;
+const STREAM_DISPLAY_CPS = 48;
+
 function parseChatMessagesFromApi(fullChat: Chat): EnrichedMessage[] {
   return (fullChat.messages || []).map((msg) => {
     if (msg.role === "assistant" && msg.content.includes("__LLM_RESPONSE__")) {
@@ -91,6 +95,81 @@ export function useChatSession() {
   const sendAbortRef = useRef<AbortController | null>(null);
   const urlRestoredRef = useRef(false);
 
+  /** 仅将消息列表容器滚到底部；不在 messages 每次变化时调用，避免与用户手动滚动冲突 */
+  const scrollMessagesToBottom = useCallback(() => {
+    const el = messagesEndRef.current;
+    if (!el) return;
+    const root = el.parentElement;
+    if (root) {
+      root.scrollTop = root.scrollHeight;
+    } else {
+      el.scrollIntoView({ block: "end", behavior: "auto" });
+    }
+  }, []);
+
+  /** 流式：后端原文缓存在 ref，界面按固定速率追赶 */
+  const streamBufferRef = useRef("");
+  const citationsRef = useRef<Citation[]>([]);
+  const streamVisibleLenRef = useRef(0);
+  const sseReaderDoneRef = useRef(false);
+  const displayTickerRef = useRef<number | null>(null);
+
+  const stopStreamDisplayTicker = useCallback(() => {
+    if (displayTickerRef.current != null) {
+      window.clearInterval(displayTickerRef.current);
+      displayTickerRef.current = null;
+    }
+  }, []);
+
+  const startStreamDisplayTicker = useCallback(() => {
+    stopStreamDisplayTicker();
+    streamBufferRef.current = "";
+    citationsRef.current = [];
+    streamVisibleLenRef.current = 0;
+    sseReaderDoneRef.current = false;
+
+    const step = Math.max(
+      1,
+      Math.round((STREAM_DISPLAY_CPS * STREAM_DISPLAY_TICK_MS) / 1000),
+    );
+
+    displayTickerRef.current = window.setInterval(() => {
+      const full = streamBufferRef.current;
+      const next = Math.min(streamVisibleLenRef.current + step, full.length);
+      streamVisibleLenRef.current = next;
+      const streamComplete = sseReaderDoneRef.current && next >= full.length;
+
+      setMessages((prev) => {
+        if (prev.length === 0 || prev[prev.length - 1].role !== "assistant") {
+          return prev;
+        }
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        let ragPipeline = last.ragPipeline;
+        if (next > 0) {
+          ragPipeline = undefined;
+        } else if (streamComplete && ragPipeline?.length) {
+          ragPipeline = ragPipeline.map((s) => ({ ...s, done: true as const }));
+        }
+        updated[updated.length - 1] = {
+          ...last,
+          role: "assistant",
+          content: full.slice(0, next),
+          citations: [...citationsRef.current],
+          ...(ragPipeline === undefined ? { ragPipeline: undefined } : { ragPipeline }),
+        };
+        return updated;
+      });
+
+      if (streamComplete) {
+        stopStreamDisplayTicker();
+        setSending(false);
+        setStreaming(false);
+        inputRef.current?.focus();
+      }
+    }, STREAM_DISPLAY_TICK_MS);
+  }, [stopStreamDisplayTicker]);
+
   const syncChatToUrl = useCallback(
     (chatId: number | null) => {
       if (typeof window === "undefined") return;
@@ -142,10 +221,6 @@ export function useChatSession() {
     if (id == null) return;
     saveChatRag(id, { ragOptions, topKInput, rerankTopNInput });
   }, [currentChat?.id, ragOptions, topKInput, rerankTopNInput]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
 
   const lastAssistantPending = useMemo(() => {
     const last = messages[messages.length - 1];
@@ -203,11 +278,12 @@ export function useChatSession() {
           setRerankTopNInput(d.rerankTopNInput);
         }
         setMobileSidebarOpen(false);
+        requestAnimationFrame(() => scrollMessagesToBottom());
       } catch (err) {
         showToast(err instanceof ApiError ? err.message : "获取对话详情失败");
       }
     },
-    [showToast, syncChatToUrl],
+    [showToast, syncChatToUrl, scrollMessagesToBottom],
   );
 
   /** 从 URL ?chat= 恢复当前会话，避免刷新后丢失选中态 */
@@ -355,8 +431,23 @@ export function useChatSession() {
       citations: [],
       _clientId: crypto.randomUUID(),
     };
+    const assistantPlaceholder: EnrichedMessage = {
+      role: "assistant",
+      content: "",
+      citations: [],
+      _clientId: crypto.randomUUID(),
+      ragPipeline: [
+        {
+          id: "__init",
+          label: "正在连接服务，准备处理你的问题…",
+          done: false,
+        },
+      ],
+    };
     const prevMessages = [...messages];
-    setMessages((prev) => [...prev, userMsg]);
+    /** 在 await fetch 之前插入助手占位，否则要等服务端 get_stream_context 结束才有 UI */
+    setMessages((prev) => [...prev, userMsg, assistantPlaceholder]);
+    requestAnimationFrame(() => scrollMessagesToBottom());
     setInput("");
     setSending(true);
     setStreaming(false);
@@ -364,6 +455,9 @@ export function useChatSession() {
     sendAbortRef.current?.abort();
     sendAbortRef.current = new AbortController();
     const signal = sendAbortRef.current.signal;
+
+    stopStreamDisplayTicker();
+    let readerFinishedOk = false;
 
     try {
       const allMessages: ChatMessage[] = [
@@ -383,6 +477,10 @@ export function useChatSession() {
       );
 
       if (response.status === 401) {
+        setMessages((prev) => (prev.length >= 2 ? prev.slice(0, -2) : prev));
+        setInput(userMsg.content);
+        setSending(false);
+        setStreaming(false);
         if (typeof window !== "undefined") {
           localStorage.removeItem("token");
           window.location.href = "/login";
@@ -399,19 +497,9 @@ export function useChatSession() {
       if (!reader) throw new Error("无法读取响应");
 
       const decoder = new TextDecoder();
-      let fullContent = "";
-      let citations: Citation[] = [];
       let lineBuf = "";
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "",
-          citations: [],
-          _clientId: crypto.randomUUID(),
-        },
-      ]);
       setStreaming(true);
+      startStreamDisplayTicker();
 
       const handleSseLine = (line: string) => {
         const data = sseDataPayload(line);
@@ -419,7 +507,28 @@ export function useChatSession() {
         if (data === "[DONE]") return;
 
         try {
-          const parsed = JSON.parse(data) as { text?: unknown };
+          const parsed = JSON.parse(data) as {
+            text?: unknown;
+            step?: { id?: string; label?: string };
+          };
+          if (parsed.step?.label) {
+            const sid = String(parsed.step.id ?? "");
+            const slab = String(parsed.step.label);
+            setMessages((prev) => {
+              const last = prev[prev.length - 1];
+              if (last?.role !== "assistant") return prev;
+              const prevSteps = last.ragPipeline ?? [];
+              const marked = prevSteps.map((s) => ({ ...s, done: true as const }));
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...last,
+                  ragPipeline: [...marked, { id: sid, label: slab, done: false }],
+                },
+              ];
+            });
+            return;
+          }
           if (!("text" in parsed) || parsed.text === undefined || parsed.text === null) {
             return;
           }
@@ -429,25 +538,20 @@ export function useChatSession() {
             const parts = text.split("__LLM_RESPONSE__");
             const contextBase64 = parts[0];
             const llmResponse = parts.slice(1).join("__LLM_RESPONSE__");
-            citations = citationsFromRagContextBase64(contextBase64);
+            citationsRef.current = citationsFromRagContextBase64(contextBase64);
             text = llmResponse;
+          } else if (text.length >= 400 && /^[A-Za-z0-9+/=\s]+$/.test(text)) {
+            /* 仅 Base64 上下文、未带分隔符时勿写入正文缓冲，否则会瞬间清空检索进度条 */
+            try {
+              citationsRef.current = citationsFromRagContextBase64(text.replace(/\s/g, ""));
+            } catch {
+              /* 非合法上下文则忽略 */
+            }
+            text = "";
           }
 
           if (text) {
-            fullContent += text;
-          }
-          if (text || citations.length > 0) {
-            const snapshot = fullContent;
-            const snapshotCitations = citations;
-            setMessages((prev) => {
-              const updated = [...prev];
-              updated[updated.length - 1] = {
-                role: "assistant",
-                content: snapshot,
-                citations: snapshotCitations,
-              };
-              return updated;
-            });
+            streamBufferRef.current += text;
           }
         } catch {
           /* 非 JSON 行跳过 */
@@ -467,6 +571,8 @@ export function useChatSession() {
       if (lineBuf.trim()) {
         handleSseLine(lineBuf);
       }
+      sseReaderDoneRef.current = true;
+      readerFinishedOk = true;
     } catch (err) {
       const aborted =
         (err instanceof DOMException && err.name === "AbortError") ||
@@ -494,9 +600,12 @@ export function useChatSession() {
       }
     } finally {
       sendAbortRef.current = null;
-      setSending(false);
-      setStreaming(false);
-      inputRef.current?.focus();
+      if (!readerFinishedOk) {
+        stopStreamDisplayTicker();
+        setSending(false);
+        setStreaming(false);
+        inputRef.current?.focus();
+      }
     }
   }, [
     input,
@@ -507,6 +616,9 @@ export function useChatSession() {
     ragOptions,
     topKInput,
     rerankTopNInput,
+    stopStreamDisplayTicker,
+    startStreamDisplayTicker,
+    scrollMessagesToBottom,
   ]);
 
   const handleKeyDown = useCallback(

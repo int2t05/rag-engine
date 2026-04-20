@@ -77,8 +77,8 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex h-full min-h-[calc(100vh-3.5rem)]">
-      <div className="hidden w-64 flex-shrink-0 flex-col border-r border-border bg-surface md:flex">
+    <div className="flex h-full min-h-0 w-full">
+      <div className="hidden h-full min-h-0 w-64 flex-shrink-0 flex-col border-r border-border bg-surface md:flex">
         <ChatList
           chats={chats}
           currentChat={currentChat}
@@ -125,7 +125,7 @@ export default function ChatPage() {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col bg-surface-muted">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface-muted">
         {currentChat ? (
           <>
             <div className="flex h-12 flex-shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
@@ -151,7 +151,7 @@ export default function ChatPage() {
               <h2 className="truncate text-sm font-semibold text-ink">{currentChat.title}</h2>
             </div>
 
-            <div className="scrollbar-thin flex-1 space-y-4 overflow-y-auto p-4 md:p-6">
+            <div className="scrollbar-thin min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden overscroll-y-contain p-4 md:p-6">
               {messages.length === 0 && (
                 <div className="py-12 text-center text-sm text-muted">开始发送消息进行问答</div>
               )}
@@ -162,7 +162,9 @@ export default function ChatPage() {
                   chatId={currentChat.id}
                 />
               ))}
-              {sending && !streaming && <LoadingDots />}
+              {sending &&
+                !streaming &&
+                messages[messages.length - 1]?.role !== "assistant" && <LoadingDots />}
               <div ref={messagesEndRef} />
             </div>
 

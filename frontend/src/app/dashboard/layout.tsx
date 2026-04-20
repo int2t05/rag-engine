@@ -194,7 +194,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           )}
         </header>
 
-        <main className={`min-h-0 flex-1 overflow-auto ${mainBleed ? "p-0" : "p-4 md:p-6"}`}>{children}</main>
+        <main
+          className={`min-h-0 flex-1 ${mainBleed ? "overflow-hidden p-0" : "overflow-auto p-4 md:p-6"}`}
+        >
+          {children}
+        </main>
       </div>
     </div>
   );

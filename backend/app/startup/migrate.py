@@ -9,8 +9,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator, Tuple
 
+from alembic import command
 from alembic.config import Config
-from alembic.config import main as alembic_main
 from alembic.migration import MigrationContext
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Connection
@@ -69,7 +69,7 @@ class DatabaseMigrator:
         从 backend/alembic.ini 加载配置，并将数据库 URL 注入到配置中。
         """
         project_root = Path(__file__).resolve().parents[2]
-        alembic_cfg = Config(project_root / "alembic.ini")
+        alembic_cfg = Config(str(project_root / "alembic.ini"))
         alembic_cfg.set_main_option("sqlalchemy.url", self.db_url)
         return alembic_cfg
 
@@ -86,7 +86,8 @@ class DatabaseMigrator:
             if needs_migration:
                 logger.info(f"Current revision: {current_rev}, upgrading to: {head_rev}")
                 self.alembic_cfg.set_main_option("sqlalchemy.url", self.db_url)
-                alembic_main(argv=["--raiseerr", "upgrade", "head"], config=self.alembic_cfg)
+                # 须使用 command.upgrade；alembic.config.main 不接受 config=，会忽略传入配置
+                command.upgrade(self.alembic_cfg, "head")
                 logger.info("Database migrations completed successfully")
             else:
                 logger.info(f"Database is already at the latest version: {current_rev}")

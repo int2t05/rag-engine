@@ -3,13 +3,14 @@
  * @description 统一导出聊天相关的 React 组件和类型
  */
 
-import type { ChatMessage } from "@/lib/api";
+export type { EnrichedMessage, RagPipelineStep } from "./types";
 
 // 组件
 export { ChatList } from "./ChatList";
 export { Citations } from "./Citations";
 export { MessageBubble } from "./MessageBubble";
 export { LoadingDots } from "./LoadingDots";
+export { RagProgressPanel } from "./RagProgressPanel";
 export { NewChatModal } from "./NewChatModal";
 export { RagOptionsBar } from "./RagOptionsBar";
 
@@ -19,7 +20,3 @@ export interface KbOption {
   name: string;
 }
 
-export interface EnrichedMessage extends ChatMessage {
-  citations?: Array<{ index: number; page_content: string; metadata: Record<string, unknown> }>;
-  _clientId?: string;
-}

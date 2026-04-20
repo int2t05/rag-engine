@@ -33,7 +33,7 @@ from app.modules.chat import (
     get_stream_context,
     list_chats,
 )
-from app.modules.chat.rag_service import generate_response
+from app.modules.chat.rag_service import _sse_step_line, generate_response
 
 router = APIRouter()
 
@@ -141,6 +141,8 @@ async def create_message_endpoint(
         # 将 rt 存入 ContextVar，使其在异步调用链中全局可访问
         tok = set_ai_runtime_token(rt)
         try:
+            # 首包：在 generate_response 内 DB 写入之前推送，避免客户端长时间收不到任何 SSE 行
+            yield _sse_step_line("stream_open", "流式连接已建立，开始处理…")
             async for chunk in generate_response(
                 query=body.messages[-1].content,  # 用户当前输入作为 query
                 messages=messages,  # 整理后的历史消息（含 system prompt）

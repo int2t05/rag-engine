@@ -59,7 +59,7 @@ conda env create -f environment.yml
 conda activate p311
 # Copy .env.example to .env at repo root and set MYSQL_*, SECRET_KEY, MINIO_*, CHROMA_*, etc.
 cd ..
-uvicorn backend.app.main:app --reload --app-dir backend
+uvicorn app.main:app --reload --app-dir backend
 ```
 
 - OpenAPI UI: <http://127.0.0.1:8000/docs>

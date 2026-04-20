@@ -61,7 +61,7 @@ conda env create -f environment.yml   # 或 python -m venv .venv && pip install 
 conda activate p311
 # 在项目根目录复制 .env.example 为 .env 并填写 MYSQL_*、SECRET_KEY、MINIO_*、CHROMA_* 等
 cd ..
-uvicorn backend.app.main:app --reload --app-dir backend
+uvicorn app.main:app --reload --app-dir backend
 ```
 
 - API 文档：<http://127.0.0.1:8000/docs>（根路径 `/` 在浏览器中会重定向到 Swagger）

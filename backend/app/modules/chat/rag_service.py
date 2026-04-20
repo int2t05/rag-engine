@@ -40,6 +40,12 @@ from app.modules.chat.rag.orchestrator import RagOrchestrator
 
 logger = logging.getLogger(__name__)
 
+
+def _sse_step_line(step_id: str, label: str) -> str:
+    """SSE：推送 RAG 流水线步骤（与 {"text": ...} 并列，前端单独解析）。"""
+    payload = {"step": {"id": step_id, "label": label}}
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n"
+
 _CANCELLED_SUFFIX = "\n\n（已停止生成）"
 _STOPPED_ONLY = "（已停止生成）"
 
@@ -171,6 +177,8 @@ async def generate_response(
         db.add(bot_message)
         db.commit()
 
+        yield _sse_step_line("persist", "已保存消息，准备检索知识库…")
+
         # 2. 加载知识库和向量存储（仅包含有已入库文档的库）
         knowledge_bases = (
             db.query(KnowledgeBase)
@@ -196,6 +204,7 @@ async def generate_response(
                 vector_stores.append(vector_store)
 
         if not vector_stores:
+            yield _sse_step_line("no_index", "未找到可用的向量索引（知识库无已处理文档）")
             error_msg = "我没有任何知识基础来帮助回答你的问题。"
             yield f"data: {json.dumps({'text': error_msg}, ensure_ascii=False)}\n"
             yield "data: [DONE]\n"  # 结束标记
@@ -203,6 +212,11 @@ async def generate_response(
             db.commit()
             stream_finished_ok = True
             return
+
+        yield _sse_step_line(
+            "load_index",
+            f"已连接 {len(vector_stores)} 个知识库的 Embedding 向量索引，开始检索流水线…",
+        )
 
         llm = LLMFactory.create()
 
@@ -259,8 +273,20 @@ async def generate_response(
             vector_stores=vector_stores,
             options=opts,
         )
-        await RagOrchestrator.run_retrieval_pipeline(ctx)
+        async for step_id, step_label in RagOrchestrator.iter_retrieval_pipeline(ctx):
+            if await _client_gone():
+                bot_message.content = _STOPPED_ONLY  # type: ignore
+                db.commit()
+                yield "data: [DONE]\n"
+                return
+            yield _sse_step_line(step_id, step_label)
+
         retrieved_docs = ctx.retrieved_docs
+
+        yield _sse_step_line(
+            "compose",
+            f"已检索 {len(retrieved_docs)} 条片段，正在组织上下文并生成回答…",
+        )
 
         full_response = ""
         base64_context = base64.b64encode(
